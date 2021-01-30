@@ -20,7 +20,7 @@ definition(
 	name: "Mitsubishi2Mqtt Thermostat Manager",
 	namespace: "dtherron",
 	author: "Dan Herron",
-	description: "Control a Mitsubishi heat pump as a thermostat.",
+	description: "Add Mitsubishi heat pumps communicating via MQTT as thermostats. See https://github.com/gysmo38/mitsubishi2MQTT for communicating with the heat pump.",
 	category: "Green Living",
 	iconUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-logo-small.png",
 	iconX2Url: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-logo.png",
