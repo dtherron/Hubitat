@@ -20,7 +20,7 @@ definition(
 	name: "Mitsubishi2Mqtt Thermostat Child",
 	namespace: "dtherron",
 	author: "Dan Herron",
-	description: "Join any sensor(s) with any outlet(s) for virtual thermostat control.",
+	description: "Configure the MQTT properties to connect to a Mitsubishi heat pump that will appear as a thermostat.",
 	category: "Green Living",
 	iconUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-logo-small.png",
 	iconX2Url: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-logo.png",
