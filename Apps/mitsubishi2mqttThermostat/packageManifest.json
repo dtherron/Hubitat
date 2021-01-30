@@ -1,24 +1,24 @@
 {
-  "packageName": "Advanced vThermostat",
-  "author": "Nelson Clark",
-  "version": "0.7",
+  "packageName": "Mitsubishi2Mqtt Thermostat",
+  "author": "Dan Herron",
+  "version": "0.1",
   "minimumHEVersion": "2.1.9",
-  "dateReleased": "2020-12-01",
+  "dateReleased": "2021-02-01",
   "apps": [
     {
-      "id": "560ac9c9-0dc8-4010-b748-5f5cb3c77a62",
-      "name": "Advanced vThermostat Manager",
-      "namespace": "nclark",
-      "location": "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat/Advanced_vThermostat-Parent.groovy",
+      "id": "8eb2bb60-f0b0-4f00-bbca-0a81a8d4990b",
+      "name": "Mitsubishi2Mqtt Thermostat Manager",
+      "namespace": "dtherron",
+      "location": "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-Parent.groovy",
       "required": true,
       "oauth": false,
       "primary": false
     },
     {
-      "id": "4a21c794-d129-47cd-a7ed-89660678027a",
-      "name": "Advanced vThermostat Child",
-      "namespace": "nclark",
-      "location": "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat/Advanced_vThermostat-Child.groovy",
+      "id": "b774eef7-a695-4357-b902-7fd467fed096",
+      "name": "Mitsubishi2Mqtt Thermostat Child",
+      "namespace": "dherron",
+      "location": "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-Child.groovy",
       "required": true,
       "oauth": false,
       "primary": false
@@ -26,10 +26,10 @@
   ],
   "drivers": [
     {
-      "id": "0ad321a3-6100-4482-aa74-c9c4285bbee7",
-      "name": "Advanced vThermostat Device",
-      "namespace": "nclark",
-      "location": "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat/Advanced_vThermostat-Device.groovy",
+      "id": "22982485-30fe-46ba-b433-4d50ee5b9e65",
+      "name": "Mitsubishi2Mqtt Thermostat Device",
+      "namespace": "dtherron",
+      "location": "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-Device.groovy",
       "required": true
     }
   ]
