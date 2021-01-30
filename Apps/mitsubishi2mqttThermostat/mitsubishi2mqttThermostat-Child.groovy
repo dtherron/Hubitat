@@ -28,7 +28,6 @@ definition(
 	parent: "dtherron:Mitsubishi2Mqtt Thermostat Manager"
 )
 
-
 preferences {
 	page(name: "pageConfig") // Doing it this way elimiates the default app name/mode options.
 }
