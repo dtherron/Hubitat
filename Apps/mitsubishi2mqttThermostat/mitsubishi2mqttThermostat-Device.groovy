@@ -1,7 +1,7 @@
 /*
- *  Advanced Virtual Thermostat Device Driver
- *  Project URL: https://github.com/NelsonClark/Hubitat/tree/main/Apps/Advanced_vThermostat
- *  Copyright 2020 Nelson Clark
+ *  Mitsubishi2Mqtt Thermostat Device Driver
+ *  Project URL: https://github.com/dtherron/Hubitat/edit/main/Apps/mitsubishi2mqttThermostat
+ *  Copyright 2021 Dan Herron
  *
  *  This driver is not meant to be used by itself, please go to the project page for more information.
  *
@@ -17,10 +17,10 @@
  */
 
 metadata {
-	definition (name: "Advanced vThermostat Device", 
-		namespace: "nclark", 
-		author: "Nelson Clark",
-		importUrl: "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat/Advanced_vThermostat-Device.groovy") {
+	definition (name: "Mitsubishi2Mqtt Thermostat Device", 
+		namespace: "dtherron", 
+		author: "Dan Herron",
+		importUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-Device.groovy") {
 		
 		capability "Thermostat"
 		capability "Sensor"
