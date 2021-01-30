@@ -1,9 +1,9 @@
 /*
- *  Advance vThermostat Child App
- *  Project URL: https://github.com/NelsonClark/Hubitat/tree/main/Apps/vThermostat
- *  Copyright 2020 Nelson Clark
+ *  Mitsubishi2Mqtt Thermostat Child App
+ *  Project URL: https://github.com/dtherron/Hubitat/edit/main/Apps/mitsubishi2mqttThermostat
+ *  Copyright 2021 Dan Herron
  *
- *  This app requires it's parent app and device driver to function, please go to the project page for more information.
+ *  This app requires its parent app and device driver to function; please go to the project page for more information.
  *
  *  Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except
  *  in compliance with the License. You may obtain a copy of the License at:
@@ -17,15 +17,15 @@
  */
 
 definition(
-	name: "Advanced vThermostat Child",
-	namespace: "nclark",
-	author: "Nelson Clark",
+	name: "Mitsubishi2Mqtt Thermostat Child",
+	namespace: "dtherron",
+	author: "Dan Herron",
 	description: "Join any sensor(s) with any outlet(s) for virtual thermostat control.",
 	category: "Green Living",
-	iconUrl: "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat/Advanced_vThermostat-logo-small.png",
-	iconX2Url: "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat/Advanced_vThermostat-logo.png",
-	importUrl: "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat/Advanced_vThermostat-Child.groovy",
-	parent: "nclark:Advanced vThermostat Manager"
+	iconUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-logo-small.png",
+	iconX2Url: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-logo.png",
+	importUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-Child.groovy",
+	parent: "dtherron:Mitsubish2Mqtt Thermostat Manager"
 )
 
 
