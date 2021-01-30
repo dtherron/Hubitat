@@ -25,7 +25,6 @@ definition(
 	iconUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-logo-small.png",
 	iconX2Url: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-logo.png",
 	importUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-Child.groovy",
-	parent: "dtherron:Mitsubishi2Mqtt Thermostat Manager",
 	parent: "dtherron:Mitsubishi2Mqtt Thermostat Manager"
 )
 
