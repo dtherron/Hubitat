@@ -114,8 +114,8 @@ def installed() {
 	logger("info", "Creating Mitsubishi2Mqtt Thermostat : ${label} with device id: ${state.deviceID}")
 	try {
 		//** Should we add isComponent in the properties of the child device to make sure we can't remove the Device, will this make it that we can't change settings in it? 
-		thermostat = addChildDevice("nclark", "Advanced Mitsubishi2Mqtt Thermostat Device", state.deviceID, null, [label: label, name: label, completedSetup: true]) //** Deprecated hubIDl no longer passed since 2.1.9
-		//thermostat = addChildDevice("nclark", "Advanced Mitsubishi2Mqtt Thermostat Device", state.deviceID, [label: label, name: label, completedSetup: true]) //** This will only work with ver 2.1.9 and up, let's wait a bit
+		//thermostat = addChildDevice("dtherron", "Advanced Mitsubishi2Mqtt Thermostat Device", state.deviceID, null, [label: label, name: label, completedSetup: true]) //** Deprecated hubIDl no longer passed since 2.1.9
+		thermostat = addChildDevice("dtherron", "Advanced Mitsubishi2Mqtt Thermostat Device", state.deviceID, [label: label, name: label, completedSetup: true]) //** This will only work with ver 2.1.9 and up, let's wait a bit
 	} catch(e) {
 		logger("error", "Error adding Mitsubishi2Mqtt Thermostat child ${label}: ${e}") //*** Not 100% sure about this one, test message outside loop to be sure ***
 		//*** Original code: log.error("Could not create Mitsubishi2Mqtt Thermostat; caught exception", e)

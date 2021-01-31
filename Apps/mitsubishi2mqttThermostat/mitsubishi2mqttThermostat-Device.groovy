@@ -16,6 +16,12 @@
  * 
  */
 
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+
+public static String version() { return "v1.0.0" }
+public static String rootTopic() { return "hubitat" }
+
 metadata {
 	definition (name: "Mitsubishi2Mqtt Thermostat Device", 
 		namespace: "dtherron", 
@@ -25,6 +31,42 @@ metadata {
 		capability "Thermostat"
 		capability "Sensor"
 		capability "Actuator"
+
+		preferences {
+			input(
+		        name: "brokerIp", 
+		        type: "string",
+				title: "MQTT Broker IP Address",
+				description: "e.g. 192.168.1.200",
+				required: true,
+				displayDuringSetup: true
+			)
+			input(
+		        name: "brokerPort", 
+		        type: "string",
+				title: "MQTT Broker Port",
+				description: "e.g. 1883",
+				required: true,
+				displayDuringSetup: true
+			)
+
+		    input(
+		        name: "brokerUser", 
+		        type: "string",
+				title: "MQTT Broker Username",
+				description: "e.g. mqtt_user",
+				required: false,
+				displayDuringSetup: true
+			)
+		    input(
+		        name: "brokerPassword", 
+		        type: "password",
+				title: "MQTT Broker Password",
+				description: "e.g. ^L85er1Z7g&%2En!",
+				required: false,
+				displayDuringSetup: true
+			)
+        }
 
 		command "heatUp"
 		command "heatDown"
@@ -48,7 +90,9 @@ metadata {
 //************************************************************
 //************************************************************
 def installed() {
-	
+	disconnect()
+	initialize()
+
 	// Let's just set a few things before starting
 	def hubScale = getTemperatureScale()
 	
@@ -87,6 +131,9 @@ def installed() {
 //************************************************************
 //************************************************************
 def updated() {
+	disconnect()
+	initialize()
+
 	//** Send events only if needed ?
 
 	// Let's just set a few things before starting
@@ -134,14 +181,6 @@ def updated() {
 		logger("trace", "updated() - Nothing to do")
 	}
 }
-
-
-//************************************************************
-//************************************************************
-def parse(String description) {
-	// Nothing to parse here since this is a virtual device
-}
-
 
 //************************************************************
 // evaluateMode
@@ -1014,4 +1053,161 @@ def roundDegrees(Double value) {
 	}
 	
 	return value	
+}
+
+// ========================================================
+// MQTT COMMANDS
+// ========================================================
+
+void initialize() {
+    logger("debug", "Connecting to MQTT broker")
+    
+    try {   
+        interfaces.mqtt.connect(getBrokerUri(),
+                           "hubitat_${getHubId()}", 
+                           settings?.brokerUser, 
+                           settings?.brokerPassword, 
+                           lastWillTopic: "${getTopicPrefix()}LWT",
+                           lastWillQos: 0, 
+                           lastWillMessage: "offline", 
+                           lastWillRetain: true)
+       
+        // delay for connection
+        pauseExecution(1000)
+        
+    } catch(Exception e) {
+        logger("error", "Connecting MQTT failed: ${e}")
+    }
+}
+
+def publish(topic, payload) {
+    publishMqtt(topic, payload)
+}
+
+def subscribe(topic) {
+    if (notMqttConnected()) {
+        connect()
+    }
+
+    //debug("[subscribe] full topic: ${getTopicPrefix()}${topic}")
+    interfaces.mqtt.subscribe("${getTopicPrefix()}${topic}")
+}
+
+def unsubscribe(topic) {
+    if (notMqttConnected()) {
+        connect()
+    }
+    
+    //debug("[unsubscribe] full topic: ${getTopicPrefix()}${topic}")
+    interfaces.mqtt.unsubscribe("${getTopicPrefix()}${topic}")
+}
+
+def connect() {
+    initialize()
+    connected()
+}
+
+def disconnect() {
+    try {
+        interfaces.mqtt.disconnect()
+        disconnected()
+    } catch(e) {
+        logger("warn", "Disconnection from broker failed: ${e.message}")
+        if (interfaces.mqtt.isConnected()) connected()
+    }
+}
+
+// ========================================================
+// MQTT METHODS
+// ========================================================
+
+// Parse incoming message from the MQTT broker
+def parse(String event) {
+	def temp = device.currentValue("temperature")
+    def message = interfaces.mqtt.parseMessage(event)  
+    def (name, hub, device, type) = message.topic.tokenize( '/' )
+    
+    //debug("[parse] Received MQTT message: ${message}")
+    
+    def json = new groovy.json.JsonOutput().toJson([
+        device: device,
+        type: type,
+        value: message.payload
+	])
+
+    setTemperature(temp+1)
+    return createEvent(name: "message", value: json, displayed: false)
+}
+
+def mqttClientStatus(status) {
+    //debug("[mqttClientStatus] status: ${status}")
+}
+
+def publishMqtt(topic, payload, qos = 0, retained = false) {
+    if (notMqttConnected()) {
+        initialize()
+    }
+    
+    def pubTopic = "${getTopicPrefix()}${topic}"
+
+    try {
+        interfaces.mqtt.publish("${pubTopic}", payload, qos, retained)
+        //debug("[publishMqtt] topic: ${pubTopic} payload: ${payload}")
+        
+    } catch (Exception e) {
+        error("[publishMqtt] Unable to publish message: ${e}")
+    }
+}
+
+// ========================================================
+// ANNOUNCEMENTS
+// ========================================================
+
+def connected() {
+    //info("[connected] Connected to broker")
+    sendEvent (name: "connectionState", value: "connected")
+    announceLwtStatus("online")
+}
+
+def disconnected() {
+    //info("[disconnected] Disconnected from broker")
+    sendEvent (name: "connectionState", value: "disconnected")
+    announceLwtStatus("offline")
+}
+
+def announceLwtStatus(String status) {
+    publishMqtt("LWT", status)
+    publishMqtt("FW", "${location.hub.firmwareVersionString}")
+    publishMqtt("IP", "${location.hub.localIP}")
+    publishMqtt("UPTIME", "${location.hub.uptime}")
+}
+
+// ========================================================
+// HELPERS
+// ========================================================
+
+def normalize(name) {
+    return name.replaceAll("[^a-zA-Z0-9]+","-").toLowerCase()
+}
+
+def getBrokerUri() {        
+    return "tcp://${settings?.brokerIp}:${settings?.brokerPort}"
+}
+
+def getHubId() {
+    def hub = location.hubs[0]
+    def hubNameNormalized = normalize(hub.name)
+    return "${hubNameNormalized}-${hub.hardwareID}".toLowerCase()
+}
+
+def getTopicPrefix() {
+    return "${rootTopic()}/${getHubId()}/"
+}
+
+def mqttConnected() {
+    return interfaces.mqtt.isConnected()
+}
+
+def notMqttConnected() {
+    return !mqttConnected()
 }
