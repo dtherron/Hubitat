@@ -1,14 +1,13 @@
 {
-  "author": "Nelson Clark",
-  "gitHubUrl": "https://github.com/NelsonClark/Hubitat",
-  "payPalUrl": "https://paypal.me/NelsonClarkDonate",
+  "author": "Dan Herron",
+  "gitHubUrl": "https://github.com/dtherron/Hubitat",
   "packages": [
     {
-      "id": "595c9c05-47ce-4ed9-8038-d4fdc3116e60",
-      "name": "Advanced vThermostat",
+      "id": "005e924a-6651-49bb-8be1-e26a706680e9",
+      "name": "Mitsubishi2Mqtt Thermostat",
       "category": "Convenience",
-      "location": "https://raw.githubusercontent.com/NelsonClark/Hubitat/main/Apps/Advanced_vThermostat/packageManifest.json",
-      "description": "Advanced vThermostat is a Hubitat Device Type Handler that will help create a proper virtual thermostat device.",
+      "location": "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/packageManifest.json",
+      "description": "Mitsubishi2Mqtt Thermostat is a Hubitat Device Type Handler that allow you to control a Mitsubishi heat pump that communicates over MQTT (see https://github.com/gysmo38/mitsubishi2MQTT).",
       "tags": [ "Temperature & Humidity", "Tools & Utilities", "Climate Control" ]
     }
   ]
