@@ -29,9 +29,8 @@ definition(
 )
 
 preferences {
-	page(name: "pageConfig") // Doing it this way elimiates the default app name/mode options.
+	page(name: "pageConfig") // Doing it this way eliminates the default app name/mode options.
 }
-
 
 def pageConfig() {
 	// Let's just set a few things before starting
@@ -43,48 +42,24 @@ def pageConfig() {
 		installed = true
 	}
 
-	if (hubScale == "C") {
-		setpointDistance = 3.0
-		heatingSetPoint = 21.0
-		coolingSetPoint = 24.5
-		thermostatThreshold = 0.5
-	} else {
-		setpointDistance = 5.0
-		heatingSetPoint = 70.0
-		coolingSetPoint = 76.0
-		thermostatThreshold = 1.0
-	}
-
-        // Display all options for a new instance of the Mitsubishi2Mqtt Thermostat
+    // Display all options for a new instance of the Mitsubishi2Mqtt Thermostat
 	dynamicPage(name: "", title: "", install: true, uninstall: true, refreshInterval:0) {
-		section() {
-			label title: "Name of new Mitsubishi2Mqtt Thermostat app/device:", required: true
-		}
-		
-		section("Select temperature sensor(s)... (Average value will be used if you select multiple sensors)"){
-			input "sensors", "capability.temperatureMeasurement", title: "Sensor", multiple: true, required: true
+		section("<b>Device configuration</b>") {
+			label title: "Local name of new Mitsubishi2Mqtt Thermostat app/device:", required: true
+			input (name: "mqttTopic", type: "text", title: "MQTT topic specified in the configuration on the remote arduino", required: true, defaultValue: "mitsubishi2mqtt")
+			input (name: "heatPumpFriendlyName", type: "text", title: "Friendly Name of the device specified in the configuration on the remote arduino", required: true)
 		}
 
-		section("Select outlet(s) to use for heating... "){
-			input "heatOutlets", "capability.switch", title: "Outlets", multiple: true
-		}
-
-		section("Select outlet(s) to use for cooling... "){
-			input "coolOutlets", "capability.switch", title: "Outlets", multiple: true
-		}
-
+        /*
 		// If this is the first time we install this driver, show initial settings
 		if (!state.deviceID) {
 			section("Initial Thermostat Settings... (invalid values will be set to the closest valid value)"){
 				input "heatingSetPoint", "decimal", title: "Heating Setpoint in $displayUnits, this should be at least $setpointDistance $displayUnits lower than cooling", required: true, defaultValue: heatingSetPoint
-				input "coolingSetPoint", "decimal", title: "Cooling Setpoint in $displayUnits, this should be at least $setpointDistance $displayUnits higher than heating", required: true, defaultValue: coolingSetPoint
-				//** Removed because we will take control of this decision depending on the outlets selected for heating and/or cooling
-				//input (name:"thermostatMode", type:"enum", title:"Thermostat Mode", options: ["auto","heat","cool","off"], defaultValue:"auto", required: true)
-				input "thermostatThreshold", "decimal", "title": "Temperature Threshold in $displayUnits", required: true, defaultValue: thermostatThreshold
 			}
 		}
+        */
 	
-		section("Log Settings...") {
+		section("<b>Log Settings</b>") {
 			input (name: "logLevel", type: "enum", title: "Live Logging Level: Messages with this level and higher will be logged", options: [[0: 'Disabled'], [1: 'Error'], [2: 'Warning'], [3: 'Info'], [4: 'Debug'], [5: 'Trace']], defaultValue: 3)
 			input "logDropLevelTime", "decimal", title: "Drop down to Info Level Minutes", required: true, defaultValue: 5
 		}
@@ -106,7 +81,7 @@ def installed() {
 	logger("trace", "Installed Running Mitsubishi2Mqtt Thermostat: $app.label")
 	
 	// Generate a random DeviceID
-	state.deviceID = "avt" + Math.abs(new Random().nextInt() % 9999) + 1
+	state.deviceID = "m2mt" + Math.abs(new Random().nextInt() % 9999) + now
 
 	//Create Mitsubishi2Mqtt Thermostat device
 	def thermostat
@@ -162,10 +137,6 @@ def uninstalled() {
 def initialize(thermostatInstance) {
 	logger("trace", "Initialize Running Mitsubishi2Mqtt Thermostat: $app.label")
 
-	// First we need tu unsubscribe and unschedule any previous settings we had
-	unsubscribe()
-	unschedule()
-
 	// Recheck Log level in case it was changed in the child app
 	if (settings.logLevel) {
 		loggingLevel = settings.logLevel.toInteger()
@@ -181,34 +152,10 @@ def initialize(thermostatInstance) {
 
 	logger("warn", "App logging level set to $loggingLevel")
 	logger("trace", "Initialize LogDropLevelTime: $settings.logDropLevelTime")
-
-	// Let's determine ThermostatMode depending on the choices made in the heating / cooling outlets choices
-	if (heatOutlets && coolOutlets) {
-		thermostatMode = "auto"
-	} else if (heatOutlets) {
-		thermostatMode = "heat"
-	} else if (coolOutlets) {
-		thermostatMode = "cool"
-	} else {
-		thermostatMode = "off"
-	}
 	
 	// Set device settings if this is a new device
-	if (!installed) { thermostatInstance.setHeatingSetpoint(heatingSetPoint) }
-	if (!installed) { thermostatInstance.setCoolingSetpoint(coolingSetPoint) }
-	if (!installed) { thermostatInstance.setThermostatThreshold(thermostatThreshold) }
 	thermostatInstance.setLogLevel(loggingLevel)
-	thermostatInstance.setThermostatMode(thermostatMode)
-
-	// Subscribe to the new sensor(s) and device
-	subscribe(sensors, "temperature", temperatureHandler)
-	subscribe(thermostat, "thermostatOperatingState", thermostatStateHandler)
-
-	// Update the temperature with these new sensors
-	updateTemperature()
-
-	// Schedule every minute the state of the controlled outlets
-	runEvery1Minute(setOutletsState)
+	//thermostatInstance.setThermostatMode(thermostatMode)
 }
 
 
@@ -242,131 +189,6 @@ def getThermostat() {
 		}
 		logger("trace","getThermostat child is ${child}")
 		return child
-	}
-}
-
-
-//************************************************************
-// temperatureHandler
-//     Handles a sensor temperature change event
-//     Do not call this directly, only used to handle events
-//
-// Signature(s)
-//     temperatureHandler(evt)
-//
-// Parameters
-//     evt : passed by the event subsciption
-//
-// Returns
-//     None
-//
-//************************************************************
-def temperatureHandler(evt)
-{
-	logger("debug", "Temperature changed to" + evt.doubleValue)
-	updateTemperature()
-}
-
-
-//************************************************************
-// updateTemperature
-//     Update device current temperature based on selected sensors
-//
-// Signature(s)
-//     updateTemperature()
-//
-// Parameters
-//     None
-//
-// Returns
-//     None
-//
-//************************************************************
-def updateTemperature() {
-	def total = 0;
-	def count = 0;
-	def thermostat=getThermostat()
-	
-	// Total all sensor used
-	for(sensor in sensors) {
-		total += sensor.currentValue("temperature")
-		logger("debug", "Sensor $sensor.label reported " + sensor.currentValue("temperature"))
-		count++
-	}
-	
-	// Average the total divided by number of sensors
-	def avgTemp = total / count
-	thermostat.setTemperature(avgTemp)
-	return avgTemp
-}
-
-
-//************************************************************
-// thermostatStateHandler
-//     Handles a thermostat state change event
-//     Do not call this directly, only used to handle events
-//
-// Signature(s)
-//     thermostatStateHandler(evt)
-//
-// Parameters
-//     evt : Passed by the event subscription
-//
-// Returns
-//     None
-//
-//************************************************************
-def thermostatStateHandler(evt) {
-	
-	// Thermostat device changed the state (heating / cooling or other), go change state of outlets accordingly
-	// *******************
-	// THIS DOES NOT SEEM TO WORK, SOMETHING iS MISSING HERE, WHERE DOES opState GET DEFINED
-	// OR JUST FETCH THE VALUE DIRECTLY FROM DEVICE, WE NEED TO TEST THIS A BIT
-	// *******************
-	// def opState = evt.value
-	if (evt.value) {
-		logger("info", "Thermostat state changed to ${opState}")
-		setOutletsState(opState)
-	} else {
-		logger("warn", "thermostatStateHandler got an empty event")
-	}
-}
-
-
-//************************************************************
-// setOutletsState
-//     Set the different outlets used for heating or cooling
-//
-// Signature(s)
-//     setOutletsState(string opState)
-//
-// Parameters
-//     opState : heating / cooling (all other states will turn off all outlets
-//
-// Returns
-//     None
-//
-//************************************************************
-def setOutletsState(opState) {
-	def thermostat = getThermostat()
-	
-	// Did we get a value when called, if not, let's go fetch it directly from the device 
-	opState = opState ? opState : thermostat.currentValue("thermostatOperatingState")
-
-	if (opState == "heating") {
-		coolOutlets ? coolOutlets.off() : null
-		//We need a delay to insure the off command completes as some of the heat/cool outlets could be the same.
-		heatOutlets ? heatOutlets.on() : null
-		logger("debug", "Turned on heating outlets.")
-	} else if (opState == "cooling") {
-		heatOutlets ? heatOutlets.off() : null
-		//We need a delay to insure the off command completes as some of the heat/cool outlets could be the same.
-		coolOutlets ? coolOutlets.on() : null
-		logger("debug", "Turned on cooling outlets.")
-	} else {
-		heatOutlets ? heatOutlets.off() : null
-		coolOutlets ? coolOutlets.off() : null
-		logger("debug", "Turned off all heat/cool outlets.")
 	}
 }
 
@@ -453,7 +275,6 @@ def logsDropLevel() {
 //************************************************************
 def getTemperatureScale() {
 	return "${location.temperatureScale}"
-	//return "F" //Temporary until we have all parts of it working in F
 }
 
 

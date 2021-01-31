@@ -30,8 +30,43 @@ definition(
 
 preferences {
 	page(name: "Install", title: "Mitsubishi2Mqtt Thermostat Manager", install: true, uninstall: true) {
-		section("Devices") {
+		section("<b>Enter MQTT configuration</b>") {
+			input(
+				name: "brokerIp", 
+				type: "string",
+				title: "MQTT Broker IP Address",
+				description: "e.g. 192.168.1.200",
+				required: true,
+				displayDuringSetup: true
+			)
+			input(
+				name: "brokerPort", 
+				type: "string",
+				title: "MQTT Broker Port",
+				description: "e.g. 1883",
+				required: true,
+				displayDuringSetup: true
+			)
+
+			input(
+				name: "brokerUser", 
+				type: "string",
+				title: "MQTT Broker Username",
+				description: "e.g. mqtt_user",
+				required: false,
+				displayDuringSetup: true
+			)
+			input(
+				name: "brokerPassword", 
+				type: "password",
+				title: "MQTT Broker Password",
+				description: "e.g. ^L85er1Z7g&%2En!",
+				required: false,
+				displayDuringSetup: true
+			)
 		}
+		
+		section("<b>Configure devices</b>") { }
 		section {
 			app(name: "thermostats", appName: "Mitsubishi2Mqtt Thermostat Child", namespace: "dtherron", title: "Add Mitsubishi2Mqtt Thermostat", multiple: true)
 		}

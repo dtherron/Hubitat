@@ -1,7 +1,7 @@
 {
   "packageName": "Mitsubishi2Mqtt Thermostat",
   "author": "Dan Herron",
-  "version": "0.36",
+  "version": "0.37",
   "minimumHEVersion": "2.1.9",
   "dateReleased": "2021-01-30",
   "apps": [

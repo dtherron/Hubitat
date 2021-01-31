@@ -1060,7 +1060,7 @@ def roundDegrees(Double value) {
 // ========================================================
 
 void initialize() {
-    logger("debug", "Connecting to MQTT broker")
+    logger("info", "Connecting to MQTT broker")
     
     try {   
         interfaces.mqtt.connect(getBrokerUri(),
@@ -1089,7 +1089,7 @@ def subscribe(topic) {
         connect()
     }
 
-    //debug("[subscribe] full topic: ${getTopicPrefix()}${topic}")
+    logger("debug","[subscribe] full topic: ${getTopicPrefix()}${topic}")
     interfaces.mqtt.subscribe("${getTopicPrefix()}${topic}")
 }
 
@@ -1098,7 +1098,7 @@ def unsubscribe(topic) {
         connect()
     }
     
-    //debug("[unsubscribe] full topic: ${getTopicPrefix()}${topic}")
+    logger("debug","[unsubscribe] full topic: ${getTopicPrefix()}${topic}")
     interfaces.mqtt.unsubscribe("${getTopicPrefix()}${topic}")
 }
 
@@ -1108,6 +1108,7 @@ def connect() {
 }
 
 def disconnect() {
+    logger("info", "Disconnecting from MQTT broker")
     try {
         interfaces.mqtt.disconnect()
         disconnected()
@@ -1127,7 +1128,7 @@ def parse(String event) {
     def message = interfaces.mqtt.parseMessage(event)  
     def (name, hub, device, type) = message.topic.tokenize( '/' )
     
-    //debug("[parse] Received MQTT message: ${message}")
+    logger("debug", "[parse] Received MQTT message: ${message}")
     
     def json = new groovy.json.JsonOutput().toJson([
         device: device,
@@ -1140,7 +1141,7 @@ def parse(String event) {
 }
 
 def mqttClientStatus(status) {
-    //debug("[mqttClientStatus] status: ${status}")
+    logger("debug","[mqttClientStatus] status: ${status}")
 }
 
 def publishMqtt(topic, payload, qos = 0, retained = false) {
@@ -1152,10 +1153,10 @@ def publishMqtt(topic, payload, qos = 0, retained = false) {
 
     try {
         interfaces.mqtt.publish("${pubTopic}", payload, qos, retained)
-        //debug("[publishMqtt] topic: ${pubTopic} payload: ${payload}")
+        logger("debug","[publishMqtt] topic: ${pubTopic} payload: ${payload}")
         
     } catch (Exception e) {
-        error("[publishMqtt] Unable to publish message: ${e}")
+        logger("error","[publishMqtt] Unable to publish message: ${e}")
     }
 }
 
@@ -1164,13 +1165,13 @@ def publishMqtt(topic, payload, qos = 0, retained = false) {
 // ========================================================
 
 def connected() {
-    //info("[connected] Connected to broker")
+    logger("info","[connected] Connected to broker")
     sendEvent (name: "connectionState", value: "connected")
     announceLwtStatus("online")
 }
 
 def disconnected() {
-    //info("[disconnected] Disconnected from broker")
+    logger("info","[disconnected] Disconnected from broker")
     sendEvent (name: "connectionState", value: "disconnected")
     announceLwtStatus("offline")
 }
