@@ -156,6 +156,7 @@ def initialize(thermostatInstance) {
 	// Set device settings if this is a new device
 	thermostatInstance.setLogLevel(loggingLevel)
 	//thermostatInstance.setThermostatMode(thermostatMode)
+    thermostatInstance.updated()
 }
 
 
@@ -294,4 +295,8 @@ def getDisplayUnits() {
 	} else {
 		return "°F"
 	}
+}
+
+def getInheritedSetting(setting) {
+    return settings?."${setting}" == null ? parent.getInheritedSetting(setting) : settings."${setting}"
 }

@@ -88,5 +88,10 @@ def initialize() {
 	log.debug "Initializing; there are ${childApps.size()} child apps installed"
 	childApps.each {child -> 
 		log.debug "  child app: ${child.label}"
+        child.updated()
 	}
+}
+
+def getInheritedSetting(setting) {
+    return settings."${setting}"
 }

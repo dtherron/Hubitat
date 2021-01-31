@@ -90,6 +90,7 @@ metadata {
 //************************************************************
 //************************************************************
 def installed() {
+    getParentSettings()
 	disconnect()
 	initialize()
 
@@ -131,6 +132,7 @@ def installed() {
 //************************************************************
 //************************************************************
 def updated() {
+    getParentSettings()
 	disconnect()
 	initialize()
 
@@ -1060,7 +1062,7 @@ def roundDegrees(Double value) {
 // ========================================================
 
 void initialize() {
-    logger("info", "Connecting to MQTT broker")
+    logger("info", "Connecting to MQTT broker with user ${settings?.brokerUser}")
     
     try {   
         interfaces.mqtt.connect(getBrokerUri(),
@@ -1186,6 +1188,29 @@ def announceLwtStatus(String status) {
 // ========================================================
 // HELPERS
 // ========================================================
+
+def getParentSettings() {
+	def brokerIp = parent.getInheritedSetting("brokerIp")
+	def brokerPort = parent.getInheritedSetting("brokerPort")
+	def brokerUser = parent.getInheritedSetting("brokerUser")
+	def brokerPassword = parent.getInheritedSetting("brokerPassword")
+    
+    if (brokerIp != null) {
+        device.updateSetting("brokerIp", [value: brokerIp, type: "string"])
+    }
+    
+    if (brokerPort != null) {
+        device.updateSetting("brokerPort", [value: brokerPort, type: "string"])
+    }
+    
+    if (brokerUser != null) {
+        device.updateSetting("brokerUser", [value: brokerUser, type: "string"])
+    }
+    
+    if (brokerPassword != null) {
+        device.updateSetting("brokerPassword", [value: brokerPassword, type: "password"])
+    }
+}
 
 def normalize(name) {
     return name.replaceAll("[^a-zA-Z0-9]+","-").toLowerCase()
