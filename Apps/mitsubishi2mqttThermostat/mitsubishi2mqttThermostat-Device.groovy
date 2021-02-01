@@ -49,7 +49,6 @@ metadata {
 				required: true,
 				displayDuringSetup: true
 			)
-
 		    input(
 		        name: "brokerUser", 
 		        type: "string",
@@ -64,6 +63,23 @@ metadata {
 				title: "MQTT Broker Password",
 				description: "e.g. ^L85er1Z7g&%2En!",
 				required: false,
+				displayDuringSetup: true
+			)
+			input(
+		        name: "mqttTopic", 
+		        type: "string",
+				title: "MQTT topic specified heat pump's configuration",
+				description: "e.g. mitsubishi2mqtt",
+				defaultValiue: "mitsubishi2mqtt",
+				required: true,
+				displayDuringSetup: true
+			)
+			input(
+		        name: "heatPumpFriendlyName", 
+		        type: "string",
+				title: "Friendly Name specified in your heat pump's configuration",
+				description: "e.g. UpstairsHeat",
+				required: true,
 				displayDuringSetup: true
 			)
         }
@@ -155,30 +171,6 @@ def updated() {
 			}
 		}
 	
-
-//		if (hubScale == "C") {
-//			sendEvent(name: "minCoolTemp", value: 15.5, unit: "C") // 60°F
-//			sendEvent(name: "maxCoolTemp", value: 35, unit: "C") // 95°F
-//			sendEvent(name: "minHeatTemp", value: 1.5, unit: "C") // 35°F
-//			sendEvent(name: "maxHeatTemp", value: 26.5, unit: "C") // 80°F
-//			sendEvent(name: "thermostatThreshold", value: 0.5, unit: "C") // Set by user
-//			sendEvent(name: "heatingSetpoint", value: 21.0, unit: "C") // 70°F
-//			sendEvent(name: "coolingSetpoint", value: 24.5, unit: "C") // 76°F
-//			sendEvent(name: "thermostatSetpoint", value: 21.0, unit: "C") // 70°F
-//			state.currentUnit = "C"
-//		} else {
-//			sendEvent(name: "minCoolTemp", value: 60, unit: "F") // 15.5°C
-//			sendEvent(name: "maxCoolTemp", value: 95, unit: "F") // 35°C
-//			sendEvent(name: "minHeatTemp", value: 35, unit: "F") // 1.5°C
-//			sendEvent(name: "maxHeatTemp", value: 80, unit: "F") // 26.5°C
-//			sendEvent(name: "thermostatThreshold", value: 1.0, unit: "F") // Set by user
-//			sendEvent(name: "heatingSetpoint", value: 70, unit: "F") // 21°C
-//			sendEvent(name: "coolingSetpoint", value: 76, unit: "F") // 24.5°C
-//			sendEvent(name: "thermostatSetpoint", value: 70, unit: "F") // 21°C
-//			state.currentUnit = "F"
-//		}
-//		sendEvent(name: "maxUpdateInterval", value: 65)
-//		sendEvent(name: "lastTempUpdate", value: new Date() )
 	} else {
 		logger("trace", "updated() - Nothing to do")
 	}
@@ -199,7 +191,7 @@ def updated() {
 def evaluateMode() {
 	logger("trace", "evaluateMode() - START")
 	// Run this loop every minute to see how everything is going
-	runIn(60, 'evaluateMode')
+	//runIn(60, 'evaluateMode')
 	
 	// Let's fetch all required thermostat settings
 	def temp = device.currentValue("temperature")
@@ -1080,6 +1072,9 @@ void initialize() {
     } catch(Exception e) {
         logger("error", "Connecting MQTT failed: ${e}")
     }
+
+	subscribe("state")
+	subscribe("debug")
 }
 
 def publish(topic, payload) {
@@ -1126,11 +1121,10 @@ def disconnect() {
 
 // Parse incoming message from the MQTT broker
 def parse(String event) {
-	def temp = device.currentValue("temperature")
     def message = interfaces.mqtt.parseMessage(event)  
-    def (name, hub, device, type) = message.topic.tokenize( '/' )
+    def (topic, friendlyName, messageType) = message.topic.tokenize( '/' )
     
-    logger("debug", "[parse] Received MQTT message: ${message}")
+    logger("debug", "[parse] Received MQTT message type ${messageType} on topic ${topic} from FN ${friendlyName} with value ${message.payload}")
     
     def json = new groovy.json.JsonOutput().toJson([
         device: device,
@@ -1138,8 +1132,7 @@ def parse(String event) {
         value: message.payload
 	])
 
-    setTemperature(temp+1)
-    return createEvent(name: "message", value: json, displayed: false)
+//    return createEvent(name: "message", value: json, displayed: false)
 }
 
 def mqttClientStatus(status) {
@@ -1189,27 +1182,21 @@ def announceLwtStatus(String status) {
 // HELPERS
 // ========================================================
 
+def getParentSetting(setting, type) {
+	def inheritedValue = parent?.getInheritedSetting(setting)
+	if (inheritedValue != null) {
+        logger("info", "Inheriting value ${inheritedValue} for ${setting} from parent")
+        device.updateSetting(seting, [value: inheritedValue, type: type])
+	}
+}
+
 def getParentSettings() {
-	def brokerIp = parent.getInheritedSetting("brokerIp")
-	def brokerPort = parent.getInheritedSetting("brokerPort")
-	def brokerUser = parent.getInheritedSetting("brokerUser")
-	def brokerPassword = parent.getInheritedSetting("brokerPassword")
-    
-    if (brokerIp != null) {
-        device.updateSetting("brokerIp", [value: brokerIp, type: "string"])
-    }
-    
-    if (brokerPort != null) {
-        device.updateSetting("brokerPort", [value: brokerPort, type: "string"])
-    }
-    
-    if (brokerUser != null) {
-        device.updateSetting("brokerUser", [value: brokerUser, type: "string"])
-    }
-    
-    if (brokerPassword != null) {
-        device.updateSetting("brokerPassword", [value: brokerPassword, type: "password"])
-    }
+	getParentSetting("brokerIp", "string")
+	getParentSetting("brokerPort", "string")
+	getParentSetting("brokerUser", "string")
+	getParentSetting("brokerPassword", "string")
+	getParentSetting("mqttTopic", "string")
+	getParentSetting("heatPumpFriendlyName", "string")
 }
 
 def normalize(name) {
@@ -1217,7 +1204,7 @@ def normalize(name) {
 }
 
 def getBrokerUri() {        
-    return "tcp://${settings?.brokerIp}:${settings?.brokerPort}"
+    return "tcp://${settings.brokerIp}:${settings.brokerPort}"
 }
 
 def getHubId() {
@@ -1227,7 +1214,7 @@ def getHubId() {
 }
 
 def getTopicPrefix() {
-    return "${rootTopic()}/${getHubId()}/"
+    return "${settings.mqttTopic}/${settings.heatPumpFriendlyName}/"
 }
 
 def mqttConnected() {
