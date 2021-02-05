@@ -33,9 +33,6 @@ preferences {
 }
 
 def pageConfig() {
-	// Let's just set a few things before starting
-	def displayUnits = getDisplayUnits()
-	def hubScale = getTemperatureScale()
 	installed = false
 
 	if (!state.deviceID) {
@@ -50,14 +47,9 @@ def pageConfig() {
 			input (name: "heatPumpFriendlyName", type: "text", title: "Friendly Name of the device specified in the configuration on the remote arduino", required: true)
 		}
 
-        /*
-		// If this is the first time we install this driver, show initial settings
-		if (!state.deviceID) {
-			section("Initial Thermostat Settings... (invalid values will be set to the closest valid value)"){
-				input "heatingSetPoint", "decimal", title: "Heating Setpoint in $displayUnits, this should be at least $setpointDistance $displayUnits lower than cooling", required: true, defaultValue: heatingSetPoint
-			}
+		section("Remote temperature sensor(s) (average value will be used)"){
+			input "remoteTempSensors", "capability.temperatureMeasurement", title: "Remote temperature sensors", multiple: true, required: false
 		}
-        */
 	
 		section("<b>Log Settings</b>") {
 			input (name: "logLevel", type: "enum", title: "Live Logging Level: Messages with this level and higher will be logged", options: [[0: 'Disabled'], [1: 'Error'], [2: 'Warning'], [3: 'Info'], [4: 'Debug'], [5: 'Trace']], defaultValue: 3)
@@ -81,7 +73,7 @@ def installed() {
 	logger("trace", "Installed Running Mitsubishi2Mqtt Thermostat: $app.label")
 	
 	// Generate a random DeviceID
-	state.deviceID = "m2mt" + Math.abs(new Random().nextInt() % 9999) + now
+	state.deviceID = "m2mt" + Math.abs(new Random().nextInt() % 9999) + "_" + (now() % 9999)
 
 	//Create Mitsubishi2Mqtt Thermostat device
 	def thermostat
@@ -94,7 +86,8 @@ def installed() {
 		logger("error", "Error adding Mitsubishi2Mqtt Thermostat child ${label}: ${e}") //*** Not 100% sure about this one, test message outside loop to be sure ***
 		//*** Original code: log.error("Could not create Mitsubishi2Mqtt Thermostat; caught exception", e)
 	}
-	initialize(thermostat)
+
+    updated()
 }
 
 
@@ -107,7 +100,7 @@ def updated() {
 		loggingLevel = 3
 	}
 	
-	logger("trace", "Updated Running Mitsubishi2Mqtt Thermostat: $app.label")
+    logger("trace", "Updated Running Mitsubishi2Mqtt Thermostat: $app.label.")
 
 	initialize(getThermostat())
 }
@@ -135,27 +128,38 @@ def uninstalled() {
 //
 //************************************************************
 def initialize(thermostatInstance) {
-	logger("trace", "Initialize Running Mitsubishi2Mqtt Thermostat: $app.label")
-
-	// Recheck Log level in case it was changed in the child app
+	int loggingLevel
 	if (settings.logLevel) {
 		loggingLevel = settings.logLevel.toInteger()
 	} else {
 		loggingLevel = 3
 	}
-	
+
+    logger("trace", "Initialize Running Mitsubishi2Mqtt Thermostat: $app.label.")
+
+    unsubscribe()
+    	
 	// Log level was set to a higher level than 3, drop level to 3 in x number of minutes
 	if (loggingLevel > 3) {
 		logger("trace", "Initialize runIn $settings.logDropLevelTime")
 		runIn(settings.logDropLevelTime.toInteger() * 60, logsDropLevel)
 	}
 
-	logger("warn", "App logging level set to $loggingLevel")
+    logger("warn", "App logging level set to $loggingLevel")
 	logger("trace", "Initialize LogDropLevelTime: $settings.logDropLevelTime")
 	
+ 	// Subscribe to the new sensor(s) and device
+    if (remoteTempSensors != null) {
+        logger("trace", "Initializing remote sensors")
+
+    	subscribe(remoteTempSensors, remoteTemperatureHandler, ["filterEvents": false])
+
+        // Update the temperature with these new sensors
+	    updateRemoteTemperature()
+    }
+    
 	// Set device settings if this is a new device
 	thermostatInstance.setLogLevel(loggingLevel)
-	//thermostatInstance.setThermostatMode(thermostatMode)
     thermostatInstance.updated()
 }
 
@@ -193,6 +197,56 @@ def getThermostat() {
 	}
 }
 
+//************************************************************
+// remoteTemperatureHandler
+//     Handles a sensor temperature change event
+//     Do not call this directly, only used to handle events
+//
+// Signature(s)
+//     remoteTemperatureHandler(evt)
+//
+// Parameters
+//     evt : passed by the event subsciption
+//
+// Returns
+//     None
+//
+//************************************************************
+def remoteTemperatureHandler(evt)
+{
+	updateRemoteTemperature()
+}
+
+
+//************************************************************
+// updateRemoteTemperature
+//     Update device current temperature based on selected sensors
+//
+// Signature(s)
+//     updateRemoteTemperature()
+//
+// Parameters
+//     None
+//
+// Returns
+//     None
+//
+//************************************************************
+def updateRemoteTemperature() {
+	def total = 0;
+	def count = 0;
+	def thermostat=getThermostat()
+	
+	// Average across all sensors
+	for(sensor in remoteTempSensors) {
+		total += sensor.currentValue("temperature")
+		count++
+	}
+	
+	// Average the total divided by number of sensors
+	def avgTemp = total / count
+	thermostat.setRemoteTemperature(avgTemp)
+}
 
 //************************************************************
 // logger
@@ -261,40 +315,6 @@ def logsDropLevel() {
 	
 	loggingLevel = app.getSetting('logLevel').toInteger()
 	logger("warn","App logging level set to $loggingLevel")
-}
-
-
-//************************************************************
-// getTemperatureScale
-//     Get the hubs temperature scale setting and return the result
-// Signature(s)
-//     getTemperatureScale()
-// Parameters
-//     None
-// Returns
-//     Temperature scale
-//************************************************************
-def getTemperatureScale() {
-	return "${location.temperatureScale}"
-}
-
-
-//************************************************************
-// getDisplayUnits
-//     Get the diplay units
-// Signature(s)
-//     getDisplayUnits()
-// Parameters
-//     None
-// Returns
-//     Formated Units String
-//************************************************************
-def getDisplayUnits() {
-	if (getTemperatureScale() == "C") {
-		return "°C"
-	} else {
-		return "°F"
-	}
 }
 
 def getInheritedSetting(setting) {
