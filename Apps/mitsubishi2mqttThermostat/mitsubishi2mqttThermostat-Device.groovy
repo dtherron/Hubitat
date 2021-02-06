@@ -33,6 +33,13 @@ metadata {
 		capability "Actuator"
         capability "Temperature Measurement"
 
+        command "setFanSpeed", ["string"]
+        command "setHeatPumpVane", ["string"]
+        
+        // TODO make this enums?
+        attribute "heatPumpVane", "string"
+        attribute "heatPumpWideVane", "string"
+
 		preferences {
 			input(
 		        name: "brokerIp", 
@@ -87,49 +94,70 @@ metadata {
 	}
 }
 
-def auto() { setThermostatMode("auto") }
-def cool() { setThermostatMode("cool") }
-def heat() { setThermostatMode("heat") }
-def off() { setThermostatMode("off") }
-def setThermostatMode(String value) {
-	if (value != device.currentValue("thermostatMode")) {
-        logger("debug", "setThermostatMode to ${value}")
-        publishMqtt("mode/set", value)
-	} else {
-		logger("trace", "setThermostatMode($value) - already set")
-	}
+def auto() { 
+    logger("trace", "command auto called")
+    setThermostatMode("auto") 
 }
-                             
+
+def cool() {
+    logger("trace", "command cool called")
+    setThermostatMode("cool") 
+}
+
+def heat() {
+    logger("trace", "command heat called")
+    setThermostatMode("heat") 
+}
+
+def off() {
+    logger("trace", "command off called")
+    setThermostatMode("off") 
+}
+
 def setCoolingSetpoint(value) {
-    logger("trace", "setHeatingSetpoint")
+    logger("trace", "command setHeatingSetpoint called: ${value}")
     publishMqtt("temp/set", "${value}")
 }
+
 def setHeatingSetpoint(value) {
-    logger("trace", "setHeatingSetpoint")
+    logger("trace", "command setHeatingSetpoint called: ${value}")
     publishMqtt("temp/set", "${value}")
 }
-                                           
-def fanCirculate() { logger("trace", "fanCirculate not available on this device") }
-def fanOn() { logger("trace", "fanOn not available on this device") }
-def fanAuto() { logger("trace", "fanAuto not available on this device") }
-def emergencyHeat() { logger("trace", "emergencyHeat not available on this device") }
-def setSchedule(schedule) { logger("trace", "setSchedule not available on this device") } 
-def setThermostatFanMode(fanmode) { logger("trace", "setThermostatFanMode not available on this device") }
+
+def setFanSpeed(value) {
+    logger("trace", "command setFanSpeed called: ${value}")
+    publishMqtt("fan/set", "${value}")
+}
+
+def setHeatPumpVane(value) {
+    logger("trace", "command setHeatPumpVane called: ${value}")
+    publishMqtt("vane/set", "${value}")
+}
+
+def fanCirculate() { logger("warn", "command fanCirculate not available on this device") }
+def fanOn() { logger("warn", "command fanOn not available on this device") }
+def fanAuto() { logger("warn", "command fanAuto not available on this device") }
+def emergencyHeat() { logger("warn", "command emergencyHeat not available on this device") }
+def setSchedule(schedule) { logger("warn", "setSchedule not available on this device") } 
+def setThermostatFanMode(fanmode) { logger("warn", "setThermostatFanMode not available on this device") }
                                            
 //************************************************************
 //************************************************************
 def installed() {
     logger("info", "Device installed. Initializing to defaults.")
 
-    sendEvent(name: "supportedThermostatFanModes", value: ["auto"], isStateChange: true)
+    sendEvent(name: "supportedThermostatFanModes", value: ["AUTO", "QUIET", "1", "2", "3", "4"], isStateChange: true)
 	sendEvent(name: "supportedThermostatModes", value: ["off", "auto", "heat", "cool"] , isStateChange: true)
 	sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
-	sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
+	sendEvent(name: "thermostatFanMode", value: "AUTO", isStateChange: true)
 	sendEvent(name: "thermostatOperatingState", value: "idle", isStateChange: true)
 	sendEvent(name: "thermostatSetpoint", value: 68, isStateChange: true)
 	sendEvent(name: "heatingSetpoint", value: 68, isStateChange: true)
 	sendEvent(name: "coolingSetpoint", value: 68, isStateChange: true)
     sendEvent(name: "temperature", value: 68, isStateChange: true)
+    sendEvent(name: "heatPumpWideVane", value: "", isStateChange: true)
+    sendEvent(name: "heatPumpVane", value: "", isStateChange: true)
+    
 	updateDataValue("lastRunningMode", "off")	
 
     getParentSettings()
@@ -147,66 +175,32 @@ def updated() {
 	connect()	
 }
 
+// ========================================================
+// Remote temperature sensor methods
+// ========================================================
+def clearRemoteTemperature() {
+    if (state.lastRemoteTemperature != null) {
+        logger("debug", "resetting remote temp to 0")
+        publishMqtt("remote_temp/set", "0")
+        state.lastRemoteTemperatureTime = null
+        state.lastRemoteTemperature = null
+    }
+}
+
 def setRemoteTemperature(value) {
-    logger("debug", "set remote_temp to ${value}")
-
-    publishMqtt("remote_temp/set", "${value}")
+    if (value != state.lastRemoteTemperature) {
+        state.lastRemoteTemperature = value
+        state.lastRemoteTemperatureTime = now()
+        logger("trace", "set remote_temp to ${value}")
+        publishMqtt("remote_temp/set", "${value}")
+    }
 }
 
-//************************************************************
-// logger
-//     Wrapper function for all logging with level control via preferences
-// Signature(s)
-//     logger(String level, String msg)
-// Parameters
-//     level : Error level string
-//     msg : Message to log
-// Returns
-//     None
-//************************************************************
-def logger(level, msg) {
-
-	switch(level) {
-		case "error":
-			if (state.loggingLevel >= 1) log.error msg
-			break
-
-		case "warn":
-			if (state.loggingLevel >= 2) log.warn msg
-			break
-
-		case "info":
-			if (state.loggingLevel >= 3) log.info msg
-			break
-
-		case "debug":
-			if (state.loggingLevel >= 4) log.debug msg
-			break
-
-		case "trace":
-			if (state.loggingLevel >= 5) log.trace msg
-			break
-
-		default:
-			log.debug msg
-			break
-	}
-}
-
-
-//************************************************************
-// setLogLevel
-//     Set log level via the child app
-// Signature(s)
-//     setLogLevel(level)
-// Parameters
-//     level :
-// Returns
-//     None
-//************************************************************
-def setLogLevel(level) {
-	state.loggingLevel = level.toInteger()
-	logger("warn","Device logging level set to $state.loggingLevel")
+def checkRemoteTemperatureForStaleness() {
+    if (state.lastRemoteTemperatureTime != null && (state.lastRemoteTemperatureTime < (now() - 3600000))) {
+        logger("warn", "resetting remote temp to 0 due to no data from sensors in over an hour")
+        clearRemoteTemperature()
+    }
 }
 
 // ========================================================
@@ -270,7 +264,7 @@ def parse(String event) {
     def message = interfaces.mqtt.parseMessage(event)  
     def (topic, friendlyName, messageType) = message.topic.tokenize( '/' )
     
-    logger("debug", "[parse] Received MQTT message type ${messageType} on topic ${topic} from FN ${friendlyName} with value ${message.payload}")
+    logger("trace", "[parse] Received MQTT message type ${messageType} on topic ${topic} from FN ${friendlyName} with value ${message.payload}")
 
     def slurper = new groovy.json.JsonSlurper()
     def result = slurper.parseText(message.payload)
@@ -282,89 +276,64 @@ def parse(String event) {
     }
 }
 
+def setIfNotNullAndChanged(newValue, attributeName) {
+    if (newValue != null && device.currentValue(attributeName) != newValue) {
+        logger("debug", "setting ${attributeName} to ${newValue}")
+        sendEvent(name: attributeName, value: newValue) 
+        return true
+    }
+    return false
+}
+
 def parseSettings(parsedSettings) {
-    if (parsedSettings?.mode != null) {
-        logger("trace", "[parse] setting thermostatMode to ${parsedSettings.mode}")
-        sendEvent(name: "thermostatMode", value: parsedSettings.mode) 
+    if (setIfNotNullAndChanged(parsedSettings?.mode, "thermostatMode")) {
         updateDataValue("lastRunningMode", parsedSettings.mode)	
+        logger("info", "Mode changed to ${parsedSettings.mode}")
     }
 
-    if (parsedSettings?.temperature != null) {
-        logger("trace", "[parse] setting thermostatSetpoint to ${parsedSettings.temperature}")
-        sendEvent(name: "thermostatSetpoint", value: parsedSettings.temperature) 
+    if (setIfNotNullAndChanged(parsedSettings?.temperature, "thermostatSetpoint")) {
+        logger("info", "Set point changed to ${parsedSettings.temperature}")
         if (device.currentValue("thermostatMode") == "heat") {
-            logger("trace", "[parse] setting heatingSetpoint to ${parsedSettings.temperature}")
+            logger("trace", "setting heatingSetpoint to ${parsedSettings.temperature}")
             sendEvent(name: "heatingSetpoint", value: parsedSettings.temperature) 
         } else if (device.currentValue("thermostatMode") == "cool") {
-            logger("trace", "[parse] setting coolingSetpoint to ${parsedSettings.temperature}")
+            logger("trace", "setting coolingSetpoint to ${parsedSettings.temperature}")
             sendEvent(name: "coolingSetpoint", value: parsedSettings.temperature) 
         }
     }
 
-    if (parsedSettings?.fan != null) {
-        logger("trace", "[parse] setting fan to ${parsedSettings.fan}")
-        sendEvent(name: "thermostatFanMode", value: parsedSettings.fan) 
-    }
-
-    if (parsedSettings?.vane != null) {
-        logger("trace", "[parse] setting heatPumpVane to ${parsedSettings.vane}")
-        sendEvent(name: "heatPumpVane", value: parsedSettings.vane) 
-    }
-
-    if (parsedSettings?.wideVane != null) {
-        logger("trace", "[parse] setting heatPumpWideVane to ${parsedSettings.wideVane}")
-        sendEvent(name: "heatPumpWideVane", value: parsedSettings.wideVane) 
-    }
+    setIfNotNullAndChanged(parsedSettings?.fan, "thermostatFanMode")
+    setIfNotNullAndChanged(parsedSettings?.vane, "heatPumpVane")
+    setIfNotNullAndChanged(parsedSettings?.wideVane, "heatPumpWideVane")
 }
 
 def parseState(parsedState) {
-    if (parsedState?.mode != null) {
-        logger("trace", "[parse] setting thermostatMode to ${parsedState.mode}")
-        sendEvent(name: "thermostatMode", value: parsedState.mode) 
+    if (setIfNotNullAndChanged(parsedState?.mode, "thermostatMode")) {
         updateDataValue("lastRunningMode", parsedState.mode)	
     }
 
-    if (parsedState?.action != null) {
-        logger("trace", "[parse] setting thermostatOperatingMode to ${parsedState.action}")
-        sendEvent(name: "thermostatOperatingMode", value: parsedState.action) 
-    }
-
-    if (parsedState?.fan != null) {
-        logger("trace", "[parse] setting thermostatFanMode to ${parsedState.fan}")
-        sendEvent(name: "thermostatFanMode", value: parsedState.fan) 
-    }
-
-    if (parsedState?.vane != null) {
-        logger("trace", "[parse] setting heatPumpVane to ${parsedState.vane}")
-        sendEvent(name: "heatPumpVane", value: parsedState.vane) 
-    }
-
-    if (parsedSettings?.wideVane != null) {
-        logger("trace", "[parse] setting heatPumpWideVane to ${parsedSettings.wideVane}")
-        sendEvent(name: "heatPumpWideVane", value: parsedSettings.wideVane) 
-    }
-    
-    if (parsedState?.compressorFrequency != null) {
-        logger("trace", "[parse] setting heatPumpCompressorFrequency to ${parsedState.compressorFrequency}")
-        sendEvent(name: "heatPumpCompressorFrequency", value: parsedState.compressorFrequency) 
-    }
-
-    if (parsedState?.temperature != null) {
-        logger("trace", "[parse] setting thermostatSetpoint to ${parsedState.temperature}")
-        sendEvent(name: "thermostatSetpoint", value: parsedState.temperature) 
+    if (setIfNotNullAndChanged(parsedState?.temperature, "thermostatSetpoint")) {
         if (device.currentValue("thermostatMode") == "heat") {
-            logger("trace", "[parse] setting heatingSetpoint to ${parsedState.temperature}")
+            logger("trace", "setting heatingSetpoint to ${parsedState.temperature}")
             sendEvent(name: "heatingSetpoint", value: parsedState.temperature) 
         } else if (device.currentValue("thermostatMode") == "cool") {
-            logger("trace", "[parse] setting coolingSetpoint to ${parsedState.temperature}")
+            logger("trace", "setting coolingSetpoint to ${parsedState.temperature}")
             sendEvent(name: "coolingSetpoint", value: parsedState.temperature) 
         }
     }
 
-    if (parsedState?.roomTemperature != null) {
-        logger("trace", "[parse] setting temperature to ${parsedState.roomTemperature}")
-        sendEvent(name: "temperature", value: parsedState.roomTemperature) 
+    setIfNotNullAndChanged(parsedState?.action, "thermostatOperatingState")
+    setIfNotNullAndChanged(parsedState?.roomTemperature, "temperature")
+    setIfNotNullAndChanged(parsedState?.fan, "thermostatFanMode")
+    setIfNotNullAndChanged(parsedState?.vane, "heatPumpVane")
+    setIfNotNullAndChanged(parsedState?.wideVane, "heatPumpWideVane")
+    
+    if (parsedState?.compressorFrequency != null && state.heatPumpCompressorFrequency != parsedState?.compressorFrequency) {
+        logger("trace", "setting heatPumpCompressorFrequency to ${parsedState.compressorFrequency}")
+        state.heatPumpCompressorFrequency = parsedState.compressorFrequency 
     }
+
+    checkRemoteTemperatureForStaleness()
 }
 
 def mqttClientStatus(status) {
@@ -391,10 +360,74 @@ def publishMqtt(topic, payload, qos = 0, retained = false) {
 // HELPERS
 // ========================================================
 
+//************************************************************
+// logger
+//     Wrapper function for all logging with level control via preferences
+// Signature(s)
+//     logger(String level, String msg)
+// Parameters
+//     level : Error level string
+//     msg : Message to log
+// Returns
+//     None
+//************************************************************
+def logger(level, msg) {
+
+	switch(level) {
+		case "error":
+			if (state.loggingLevel >= 1) log.error msg
+			break
+
+		case "warn":
+			if (state.loggingLevel >= 2) log.warn msg
+			break
+
+		case "info":
+			if (state.loggingLevel >= 3) log.info msg
+			break
+
+		case "debug":
+			if (state.loggingLevel >= 4) log.debug msg
+			break
+
+		case "trace":
+			if (state.loggingLevel >= 5) log.trace msg
+			break
+
+		default:
+			log.debug msg
+			break
+	}
+}
+
+
+//************************************************************
+// setLogLevel
+//     Set log level via the child app
+// Signature(s)
+//     setLogLevel(level)
+// Parameters
+//     level :
+// Returns
+//     None
+//************************************************************
+def setLogLevel(level) {
+	state.loggingLevel = level.toInteger()
+	logger("warn","Device logging level set to $state.loggingLevel")
+}
+
+def setThermostatMode(String value) {
+	if (value != device.currentValue("thermostatMode")) {
+        logger("debug", "setThermostatMode to ${value}")
+        publishMqtt("mode/set", value)
+	}
+}
+                             
 def getParentSetting(setting, type) {
 	def inheritedValue = parent?.getInheritedSetting(setting)
 	if (inheritedValue != null) {
-        logger("trace", "Inheriting value ${inheritedValue} for ${setting} from parent")
+        def displayValue = type == "password" ? "*******" : inheritedValue;
+        logger("trace", "Inheriting value ${displayValue} for ${setting} from parent")
         device.updateSetting(setting, [value: inheritedValue, type: type])
 	}
 }

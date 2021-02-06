@@ -38,10 +38,11 @@ def pageConfig() {
 	if (!state.deviceID) {
 		installed = true
 	}
-
+    
     // Display all options for a new instance of the Mitsubishi2Mqtt Thermostat
 	dynamicPage(name: "", title: "", install: true, uninstall: true, refreshInterval:0) {
-		section("<b>Device configuration</b>") {
+        
+        section("<b>Device configuration</b>") {
 			label title: "Local name of new Mitsubishi2Mqtt Thermostat app/device:", required: true
 			input (name: "mqttTopic", type: "text", title: "MQTT topic specified in the configuration on the remote arduino", required: true, defaultValue: "mitsubishi2mqtt")
 			input (name: "heatPumpFriendlyName", type: "text", title: "Friendly Name of the device specified in the configuration on the remote arduino", required: true)
@@ -50,16 +51,14 @@ def pageConfig() {
 		section("Remote temperature sensor(s) (average value will be used)"){
 			input "remoteTempSensors", "capability.temperatureMeasurement", title: "Remote temperature sensors", multiple: true, required: false
 		}
-	
-		section("<b>Log Settings</b>") {
+
+        section("<b>Log Settings</b>") {
 			input (name: "logLevel", type: "enum", title: "Live Logging Level: Messages with this level and higher will be logged", options: [[0: 'Disabled'], [1: 'Error'], [2: 'Warning'], [3: 'Info'], [4: 'Debug'], [5: 'Trace']], defaultValue: 3)
 			input "logDropLevelTime", "decimal", title: "Drop down to Info Level Minutes", required: true, defaultValue: 5
 		}
-
-	}
+    }
 }
-
-
+    
 def installed() {
     
 	// Set log level as soon as it's installed to start logging what we do ASAP
@@ -81,11 +80,9 @@ def installed() {
 	logger("info", "Creating Mitsubishi2Mqtt Thermostat : ${label} with device id: ${state.deviceID}")
 	try {
 		//** Should we add isComponent in the properties of the child device to make sure we can't remove the Device, will this make it that we can't change settings in it? 
-		thermostat = addChildDevice("dtherron", "Mitsubishi2Mqtt Thermostat Device", state.deviceID, [label: label, name: label, completedSetup: true]) //** This will only work with ver 2.1.9 and up
+		thermostat = addChildDevice("dtherron", "Mitsubishi2Mqtt Thermostat Device", state.deviceID, [label: label, name: label, completedSetup: true])
 	} catch(e) {
-		logger("error", "Error adding Mitsubishi2Mqtt Thermostat child ${label}: ${e}") //*** Not 100% sure about this one, test message outside loop to be sure ***
-		//*** Original code: log.error("Could not create Mitsubishi2Mqtt Thermostat; caught exception", e)
-	}
+		logger("error", "Error adding Mitsubishi2Mqtt Thermostat child ${label}: ${e}")	}
 
     updated()
 }
@@ -101,7 +98,7 @@ def updated() {
 	}
 	
     logger("trace", "Updated Running Mitsubishi2Mqtt Thermostat: $app.label.")
-
+    
 	initialize(getThermostat())
 }
 
@@ -137,8 +134,6 @@ def initialize(thermostatInstance) {
 
     logger("trace", "Initialize Running Mitsubishi2Mqtt Thermostat: $app.label.")
 
-    unsubscribe()
-    	
 	// Log level was set to a higher level than 3, drop level to 3 in x number of minutes
 	if (loggingLevel > 3) {
 		logger("trace", "Initialize runIn $settings.logDropLevelTime")
@@ -147,15 +142,25 @@ def initialize(thermostatInstance) {
 
     logger("warn", "App logging level set to $loggingLevel")
 	logger("trace", "Initialize LogDropLevelTime: $settings.logDropLevelTime")
-	
- 	// Subscribe to the new sensor(s) and device
-    if (remoteTempSensors != null) {
-        logger("trace", "Initializing remote sensors")
 
+    unsubscribe()
+    thermostatInstance.clearRemoteTemperature() // Clear any lingering value
+    	
+    // Remove any sensors chosen that are actually of this device type
+    // TODO: figure out why the UI never updates to catch on to this
+    remoteTempSensors?.removeAll { device -> device.getDeviceNetworkId().startsWith("m2mt") }
+
+ 	// Subscribe to the new sensor(s) and device
+    if (remoteTempSensors != null && remoteTempSensors.size() > 0) {
+        logger("info", "Initializing ${remoteTempSensors.size()} remote sensor(s)")
+
+        // Get all events from the remote sensors. This way even if the temp is constant
+        // we have a better signal that the sensors are still online. The device client 
+        // will eventually revert to using the device temp if it stops getting updates.
     	subscribe(remoteTempSensors, remoteTemperatureHandler, ["filterEvents": false])
 
         // Update the temperature with these new sensors
-	    updateRemoteTemperature()
+	    updateRemoteTemperature(thermostatInstance)
     }
     
 	// Set device settings if this is a new device
@@ -182,13 +187,11 @@ def getThermostat() {
 	
 	// Does this instance have a DeviceID
 	if (!state.deviceID){
-		
 		//No DeviceID available what is going on, has the device been removed?
 		logger("error", "getThermostat cannot access deviceID!")
 	} else {
-		
 		//We have a deviceID, continue and return ChildDeviceWrapper
-		logger("trace", "getThermostat for device " + state.deviceID)
+        logger("trace", "getThermostat for device ${state.deviceID}")
 		def child = getChildDevices().find {
 			d -> d.deviceNetworkId.startsWith(state.deviceID)
 		}
@@ -214,7 +217,8 @@ def getThermostat() {
 //************************************************************
 def remoteTemperatureHandler(evt)
 {
-	updateRemoteTemperature()
+    //log.warn("Got event: ${evt.type} , ${evt.name}, ${evt.value}, ${evt.source}, ${evt.getDeviceId()}, ${evt.getDevice()}, ")
+	updateRemoteTemperature(getThermostat())
 }
 
 
@@ -226,26 +230,31 @@ def remoteTemperatureHandler(evt)
 //     updateRemoteTemperature()
 //
 // Parameters
-//     None
+//     thermostatInstance : deviceWrapper
 //
 // Returns
 //     None
 //
 //************************************************************
-def updateRemoteTemperature() {
+def updateRemoteTemperature(thermostatInstance) {
 	def total = 0;
 	def count = 0;
-	def thermostat=getThermostat()
 	
-	// Average across all sensors
+	// Average across all sensors, but ignore any not reporting as present
+    logger("trace", "Checking ${remoteTempSensors.size()} for presence to update remote temp")
 	for(sensor in remoteTempSensors) {
-		total += sensor.currentValue("temperature")
-		count++
+        if (sensor.currentValue("presence") == "present") {
+		    total += sensor.currentValue("temperature")
+		    count++;
+        }
 	}
 	
-	// Average the total divided by number of sensors
-	def avgTemp = total / count
-	thermostat.setRemoteTemperature(avgTemp)
+    // Only send an update if we have data
+    logger("trace", "Found ${count} valid remote temperatures")
+    if (count > 0) {
+        logger("trace", "Setting remote temp to ${total / count}")
+        thermostatInstance.setRemoteTemperature(total / count)
+    }
 }
 
 //************************************************************
@@ -264,7 +273,7 @@ def updateRemoteTemperature() {
 //
 //************************************************************
 def logger(level, msg) {
-
+    def loggingLevel = settings.logLevel.toInteger()
 	switch(level) {
 		case "error":
 			if (loggingLevel >= 1) log.error msg
