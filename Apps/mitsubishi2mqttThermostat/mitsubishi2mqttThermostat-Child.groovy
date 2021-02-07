@@ -69,7 +69,7 @@ def installed() {
 		loggingLevel = 3
 	}
 	
-	logger("trace", "Installed Running Mitsubishi2Mqtt Thermostat: $app.label")
+	logger("info", "installed", "Installed Running Mitsubishi2Mqtt Thermostat: $app.label")
 	
 	// Generate a random DeviceID
 	state.deviceID = "m2mt" + Math.abs(new Random().nextInt() % 9999) + "_" + (now() % 9999)
@@ -77,12 +77,12 @@ def installed() {
 	//Create Mitsubishi2Mqtt Thermostat device
 	def thermostat
 	def label = app.getLabel()
-	logger("info", "Creating Mitsubishi2Mqtt Thermostat : ${label} with device id: ${state.deviceID}")
+	logger("info", "installed", "Creating Mitsubishi2Mqtt Thermostat : ${label} with device id: ${state.deviceID}")
 	try {
 		//** Should we add isComponent in the properties of the child device to make sure we can't remove the Device, will this make it that we can't change settings in it? 
 		thermostat = addChildDevice("dtherron", "Mitsubishi2Mqtt Thermostat Device", state.deviceID, [label: label, name: label, completedSetup: true])
 	} catch(e) {
-		logger("error", "Error adding Mitsubishi2Mqtt Thermostat child ${label}: ${e}")	}
+		logger("error", "installed", "Error adding Mitsubishi2Mqtt Thermostat child ${label}: ${e}")	}
 
     updated()
 }
@@ -97,17 +97,16 @@ def updated() {
 		loggingLevel = 3
 	}
 	
-    logger("trace", "Updated Running Mitsubishi2Mqtt Thermostat: $app.label.")
+    logger("trace", "updated", "Updated Running Mitsubishi2Mqtt Thermostat: $app.label.")
     
 	initialize(getThermostat())
 }
 
 
 def uninstalled() {
-	logger("info", "Child Device " + state.deviceID + " removed") // This never shows in the logs, is it because of the way HE deals with the uninstalled method?
+	logger("info", "uninstalled", "Child Device " + state.deviceID + " removed") // This never shows in the logs, is it because of the way HE deals with the uninstalled method?
 	deleteChildDevice(state.deviceID)
 }
-
 
 //************************************************************
 // initialize
@@ -132,27 +131,29 @@ def initialize(thermostatInstance) {
 		loggingLevel = 3
 	}
 
-    logger("trace", "Initialize Running Mitsubishi2Mqtt Thermostat: $app.label.")
+    logger("info", "initialize", "Initialize Running Mitsubishi2Mqtt Thermostat: $app.label.")
 
 	// Log level was set to a higher level than 3, drop level to 3 in x number of minutes
 	if (loggingLevel > 3) {
-		logger("trace", "Initialize runIn $settings.logDropLevelTime")
+		logger("debug", "initialize", "Initialize runIn $settings.logDropLevelTime")
 		runIn(settings.logDropLevelTime.toInteger() * 60, logsDropLevel)
 	}
 
-    logger("warn", "App logging level set to $loggingLevel")
-	logger("trace", "Initialize LogDropLevelTime: $settings.logDropLevelTime")
+    logger("info", "initialize", "App logging level set to $loggingLevel")
+	logger("info", "initialize", "Initialize LogDropLevelTime: $settings.logDropLevelTime")
 
     unsubscribe()
     thermostatInstance.clearRemoteTemperature() // Clear any lingering value
     	
     // Remove any sensors chosen that are actually of this device type
     // TODO: figure out why the UI never updates to catch on to this
-    remoteTempSensors?.removeAll { device -> device.getDeviceNetworkId().startsWith("m2mt") }
+    if (remoteTempSensors?.removeAll { device -> device.getDeviceNetworkId().startsWith("m2mt") }) {
+        logger("warn", "initialize", "Some remote sensors were ignored because they seem to be Mitsubishi2Mqtt child devices")
+    }
 
  	// Subscribe to the new sensor(s) and device
     if (remoteTempSensors != null && remoteTempSensors.size() > 0) {
-        logger("info", "Initializing ${remoteTempSensors.size()} remote sensor(s)")
+        logger("info", "initialize", "Initializing ${remoteTempSensors.size()} remote sensor(s)")
 
         // Get all events from the remote sensors. This way even if the temp is constant
         // we have a better signal that the sensors are still online. The device client 
@@ -188,14 +189,14 @@ def getThermostat() {
 	// Does this instance have a DeviceID
 	if (!state.deviceID){
 		//No DeviceID available what is going on, has the device been removed?
-		logger("error", "getThermostat cannot access deviceID!")
+		logger("error", "getThermostat", "getThermostat cannot access deviceID!")
 	} else {
 		//We have a deviceID, continue and return ChildDeviceWrapper
-        logger("trace", "getThermostat for device ${state.deviceID}")
+        logger("trace", "getThermostat", "getThermostat for device ${state.deviceID}")
 		def child = getChildDevices().find {
 			d -> d.deviceNetworkId.startsWith(state.deviceID)
 		}
-		logger("trace","getThermostat child is ${child}")
+		logger("trace", "getThermostat", "getThermostat child is ${child}")
 		return child
 	}
 }
@@ -217,10 +218,9 @@ def getThermostat() {
 //************************************************************
 def remoteTemperatureHandler(evt)
 {
-    //log.warn("Got event: ${evt.type} , ${evt.name}, ${evt.value}, ${evt.source}, ${evt.getDeviceId()}, ${evt.getDevice()}, ")
+	logger("trace", "remoteTemperatureHandler", "Got event: ${evt.type} , ${evt.name}, ${evt.value}")
 	updateRemoteTemperature(getThermostat())
 }
-
 
 //************************************************************
 // updateRemoteTemperature
@@ -241,7 +241,7 @@ def updateRemoteTemperature(thermostatInstance) {
 	def count = 0;
 	
 	// Average across all sensors, but ignore any not reporting as present
-    logger("trace", "Checking ${remoteTempSensors.size()} for presence to update remote temp")
+    logger("trace", "updateRemoteTemperature", "Checking ${remoteTempSensors.size()} for presence to update remote temp")
 	for(sensor in remoteTempSensors) {
         if (sensor.currentValue("presence") == "present") {
 		    total += sensor.currentValue("temperature")
@@ -250,9 +250,9 @@ def updateRemoteTemperature(thermostatInstance) {
 	}
 	
     // Only send an update if we have data
-    logger("trace", "Found ${count} valid remote temperatures")
+    logger("trace", "updateRemoteTemperature", "Found ${count} valid remote temperatures")
     if (count > 0) {
-        logger("trace", "Setting remote temp to ${total / count}")
+        logger("trace", "updateRemoteTemperature", "Setting remote temp to ${total / count}")
         thermostatInstance.setRemoteTemperature(total / count)
     }
 }
@@ -260,47 +260,44 @@ def updateRemoteTemperature(thermostatInstance) {
 //************************************************************
 // logger
 //     Wrapper function for all logging with level control via preferences
-//
 // Signature(s)
 //     logger(String level, String msg)
-//
 // Parameters
 //     level : Error level string
+//     source : Calling method
 //     msg : Message to log
-//
 // Returns
 //     None
-//
 //************************************************************
-def logger(level, msg) {
+def logger(level, source, msg) {
+
     def loggingLevel = settings.logLevel.toInteger()
 	switch(level) {
 		case "error":
-			if (loggingLevel >= 1) log.error msg
+			if (state.loggingLevel >= 1) log.error "[${source}] ${msg}"
 			break
 
 		case "warn":
-			if (loggingLevel >= 2) log.warn msg
+			if (state.loggingLevel >= 2) log.warn "[${source}] ${msg}"
 			break
 
 		case "info":
-			if (loggingLevel >= 3) log.info msg
+			if (state.loggingLevel >= 3) log.info "[${source}] ${msg}"
 			break
 
 		case "debug":
-			if (loggingLevel >= 4) log.debug msg
+			if (state.loggingLevel >= 4) log.debug "[${source}] ${msg}"
 			break
 
 		case "trace":
-			if (loggingLevel >= 5) log.trace msg
+			if (state.loggingLevel >= 5) log.trace "[${source}] ${msg}"
 			break
 
 		default:
-			log.debug msg
+			log.debug "[${source}] ${msg}"
 			break
 	}
 }
-
 
 //************************************************************
 // logsDropLevel
@@ -323,7 +320,7 @@ def logsDropLevel() {
 	thermostat.setLogLevel(3)
 	
 	loggingLevel = app.getSetting('logLevel').toInteger()
-	logger("warn","App logging level set to $loggingLevel")
+	logger("info", "logsDropLevel", "App logging level set to $loggingLevel")
 }
 
 def getInheritedSetting(setting) {
