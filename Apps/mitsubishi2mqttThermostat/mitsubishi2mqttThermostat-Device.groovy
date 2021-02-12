@@ -33,13 +33,13 @@ metadata {
 		capability "Actuator"
         capability "Temperature Measurement"
 
-        command "setFanSpeed", ["string"]
+        command "setThermostatFanMode", [[name:"Fan mode (ignore above)", type: "ENUM", description:"Set the heat pump's fan speed setting", constraints: ["QUIET", "AUTO", "1", "2", "3", "4"]]]
         command "setHeatPumpVane", ["string"]
         
-        attribute "temperatureUnit", "string"
+        //attribute "temperatureUnit", "enum", ["C", "F"]
         // TODO make this enums?
-        attribute "heatPumpVane", "string"
-        attribute "heatPumpWideVane", "string"
+        attribute "heatPumpVane", "ENUM", ["AUTO", "SWING", "1", "2", "3", "4", "5"]
+        attribute "heatPumpWideVane", "ENUM", ["SWING", "<<", "<", "|", ">", ">>", "<>"]
 
 		preferences {
 			input(
@@ -96,51 +96,54 @@ metadata {
 }
 
 def auto() { 
-    logger("debug", "COMMAND", "command auto called")
+    logger("info", "COMMAND", "command auto called")
     setThermostatMode("auto") 
 }
 
 def cool() {
-    logger("debug", "COMMAND", "command cool called")
+    logger("info", "COMMAND", "command cool called")
     setThermostatMode("cool") 
 }
 
 def heat() {
-    logger("debug", "COMMAND", "command heat called")
+    logger("info", "COMMAND", "command heat called")
     setThermostatMode("heat") 
 }
 
 def off() {
-    logger("debug", "COMMAND", "command off called")
+    logger("info", "COMMAND", "command off called")
     setThermostatMode("off") 
 }
 
 def setCoolingSetpoint(value) {
-    logger("debug", "COMMAND", "command setHeatingSetpoint called: ${value}")
+    logger("info", "COMMAND", "command setCoolingSetpoint called: ${value}")
     publishMqtt("temp/set", "${value}")
 }
 
 def setHeatingSetpoint(value) {
-    logger("debug", "COMMAND", "command setHeatingSetpoint called: ${value}")
+    logger("info", "COMMAND", "command setHeatingSetpoint called: ${value}")
     publishMqtt("temp/set", "${value}")
 }
 
-def setFanSpeed(value) {
-    logger("debug", "COMMAND", "command setFanSpeed called: ${value}")
+// Hack so that the UI command works if you specify the real arg in the second param
+def setThermostatFanMode(ignore, value) { setThermostatFanMode(value) }
+
+def setThermostatFanMode(value) {
+    logger("info", "COMMAND", "command setThermostatFanMode called: ${value}")
     publishMqtt("fan/set", "${value}")
 }
 
 def setHeatPumpVane(value) {
-    logger("debug", "COMMAND", "command setHeatPumpVane called: ${value}")
+    logger("info", "COMMAND", "command setHeatPumpVane called: ${value}")
     publishMqtt("vane/set", "${value}")
 }
 
+def setFanSpeed() { logger("warn", "COMMAND", "command fanCirculate not available on this device") }
 def fanCirculate() { logger("warn", "COMMAND", "command fanCirculate not available on this device") }
 def fanOn() { logger("warn", "COMMAND", "command fanOn not available on this device") }
 def fanAuto() { logger("warn", "COMMAND", "command fanAuto not available on this device") }
 def emergencyHeat() { logger("warn", "COMMAND", "command emergencyHeat not available on this device") }
 def setSchedule(schedule) { logger("warn", "COMMAND", "setSchedule not available on this device") } 
-def setThermostatFanMode(fanmode) { logger("warn", "COMMAND", "setThermostatFanMode not available on this device") }
                                            
 //************************************************************
 //************************************************************
@@ -158,7 +161,7 @@ def installed() {
     sendEvent(name: "temperature", value: 68, isStateChange: true)
     sendEvent(name: "heatPumpWideVane", value: "SWING", isStateChange: true)
     sendEvent(name: "heatPumpVane", value: "AUTO", isStateChange: true)
-    sendEvent(name: "temperatureUnit", value: "F", isStateChange: true)
+    sendEvent(name: "temperatureUnit", value: location.temperatureScale, isStateChange: true)
     
 	updateDataValue("lastRunningMode", "off")	
 
@@ -195,7 +198,7 @@ def setRemoteTemperature(value) {
     if (value != state.lastRemoteTemperature || (state.lastRemoteTemperatureTime < (now() - 300000))) {
         state.lastRemoteTemperatureTime = now()
         state.lastRemoteTemperature = value
-        logger("debug", "setRemoteTemperature", "set remote_temp to ${value}")
+        logger("trace", "setRemoteTemperature", "set remote_temp to ${value}")
         publishMqtt("remote_temp/set", "${value}")
     } else {
         logger("trace", "setRemoteTemperature", "remote remote_temp unchaged at ${value}")
@@ -311,7 +314,10 @@ def parseSettings(parsedSettings) {
     setIfNotNullAndChanged(parsedSettings?.fan, "thermostatFanMode", "parseSettings")
     setIfNotNullAndChanged(parsedSettings?.vane, "heatPumpVane", "parseSettings")
     setIfNotNullAndChanged(parsedSettings?.wideVane, "heatPumpWideVane", "parseSettings")
-    setIfNotNullAndChanged(parsedSettings?.temperatureUnit, "temperatureUnit", "parseSettings")
+    if (setIfNotNullAndChanged(parsedSettings?.temperatureUnit, "temperatureUnit", "parseSettings") &&
+        location.temperatureScale != parsedSettings.temperatureUnit) {
+        logger("warn", "parseSettings", "Your hub is set to degrees ${location.temperatureScale} but this device reports using degrees ${parsedSettings.temperatureUnit}")
+    }
 }
 
 def parseState(parsedState) {
@@ -321,7 +327,7 @@ def parseState(parsedState) {
     }
 
     if (setIfNotNullAndChanged(parsedState?.temperature, "thermostatSetpoint", "parseState")) {
-        logger("info", "parseState", "Set point changed to ${parsedSettings.temperature}")
+        logger("info", "parseState", "Set point changed to ${parsedState.temperature}")
         if (device.currentValue("thermostatMode") == "heat") {
             logger("trace", "parseState", "setting heatingSetpoint to ${parsedState.temperature}")
             sendEvent(name: "heatingSetpoint", value: parsedState.temperature) 
@@ -331,7 +337,16 @@ def parseState(parsedState) {
         }
     }
 
-    setIfNotNullAndChanged(parsedState?.action, "thermostatOperatingState", "parseState")
+    if (setIfNotNullAndChanged(parsedState?.action, "thermostatOperatingState", "parseState")) {
+        if (device.currentValue("thermostatMode") == "heat") {
+            logger("trace", "parseState", "setting heatingSetpoint to ${parsedState.temperature}")
+            sendEvent(name: "heatingSetpoint", value: parsedState.temperature) 
+        } else if (device.currentValue("thermostatMode") == "cool") {
+            logger("trace", "parseState", "setting coolingSetpoint to ${parsedState.temperature}")
+            sendEvent(name: "coolingSetpoint", value: parsedState.temperature) 
+        }
+    }
+    
     setIfNotNullAndChanged(parsedState?.roomTemperature, "temperature", "parseState")
     setIfNotNullAndChanged(parsedState?.fan, "thermostatFanMode", "parseState")
     setIfNotNullAndChanged(parsedState?.vane, "heatPumpVane", "parseState")
@@ -427,7 +442,9 @@ def setLogLevel(level) {
 }
 
 def setThermostatMode(String value) {
-	if (value != device.currentValue("thermostatMode")) {
+    if (value == null) {
+        logger("error", "setThermostatMode", "setThermostatMode called with null")
+    } else if (value != device.currentValue("thermostatMode")) {
         logger("debug", "setThermostatMode", "setThermostatMode to ${value}")
         publishMqtt("mode/set", value)
 	}
