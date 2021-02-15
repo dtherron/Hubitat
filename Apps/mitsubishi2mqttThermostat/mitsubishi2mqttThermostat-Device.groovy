@@ -36,8 +36,7 @@ metadata {
         command "setThermostatFanMode", [[name:"Fan mode (ignore above)", type: "ENUM", description:"Set the heat pump's fan speed setting", constraints: ["QUIET", "AUTO", "1", "2", "3", "4"]]]
         command "setHeatPumpVane", ["string"]
         
-        //attribute "temperatureUnit", "enum", ["C", "F"]
-        // TODO make this enums?
+        attribute "temperatureUnit", "ENUM", ["C", "F"]
         attribute "heatPumpVane", "ENUM", ["AUTO", "SWING", "1", "2", "3", "4", "5"]
         attribute "heatPumpWideVane", "ENUM", ["SWING", "<<", "<", "|", ">", ">>", "<>"]
 
@@ -193,22 +192,25 @@ def clearRemoteTemperature() {
 }
 
 def setRemoteTemperature(value) {
-    // Don't update duplicate temperatures more than every five minutes. Note that this is multi threaded
-    // and near simultaneous calls can get through. Need to think about synchronizing
-    if (value != state.lastRemoteTemperature || (state.lastRemoteTemperatureTime < (now() - 300000))) {
-        state.lastRemoteTemperatureTime = now()
-        state.lastRemoteTemperature = value
-        logger("trace", "setRemoteTemperature", "set remote_temp to ${value}")
-        publishMqtt("remote_temp/set", "${value}")
-    } else {
-        logger("trace", "setRemoteTemperature", "remote remote_temp unchaged at ${value}")
+    // Don't update duplicate temperatures more than every five minutes.
+    synchronized(this) {
+        if (value != state.lastRemoteTemperature || (state.lastRemoteTemperatureTime < (now() - 300000))) {
+            state.lastRemoteTemperatureTime = now()
+            state.lastRemoteTemperature = value
+            logger("trace", "setRemoteTemperature", "set remote_temp to ${value}")
+            publishMqtt("remote_temp/set", "${value}")
+        } else {
+            logger("trace", "setRemoteTemperature", "remote remote_temp unchaged at ${value}")
+        }
     }
 }
 
 def checkRemoteTemperatureForStaleness() {
-    if (state.lastRemoteTemperatureTime != null && (state.lastRemoteTemperatureTime < (now() - 3600000))) {
-        logger("warn", "checkRemoteTemperatureForStaleness", "resetting remote temp to 0 due to no data from sensors in over an hour")
-        clearRemoteTemperature()
+    synchronized(this) {
+        if (state.lastRemoteTemperatureTime != null && (state.lastRemoteTemperatureTime < (now() - 3600000))) {
+            logger("warn", "checkRemoteTemperatureForStaleness", "resetting remote temp to 0 due to no data from sensors in over an hour")
+            clearRemoteTemperature()
+        }
     }
 }
 
@@ -217,17 +219,21 @@ def checkRemoteTemperatureForStaleness() {
 // ========================================================
 
 def subscribe(topic) {
-    if (notMqttConnected()) {
-        connect()
+    synchronized(this) {
+        if (notMqttConnected()) {
+            connect()
+        }
     }
-
+    
     logger("info", "subscribe", "full topic: ${getTopicPrefix()}${topic}")
     interfaces.mqtt.subscribe("${getTopicPrefix()}${topic}")
 }
 
 def unsubscribe(topic) {
-    if (notMqttConnected()) {
-        connect()
+    synchronized(this) {
+        if (notMqttConnected()) {
+            connect()
+        }
     }
     
     logger("info", "unsubscribe", "full topic: ${getTopicPrefix()}${topic}")
@@ -318,6 +324,16 @@ def parseSettings(parsedSettings) {
         location.temperatureScale != parsedSettings.temperatureUnit) {
         logger("warn", "parseSettings", "Your hub is set to degrees ${location.temperatureScale} but this device reports using degrees ${parsedSettings.temperatureUnit}")
     }
+
+    if (parsedSettings?.temperatureSource != null) {
+        if (parsedSettings.temperatureSource == "local" && state.lastRemoteTemperatureTime != null) {
+            logger("warn", "parseSettings", "The heat pump has reverted to using local temperature readings")
+            clearRemoteTemperature()
+        } else if (parsedSettings.temperatureSource == "remote" && state.lastRemoteTemperatureTime == null) {
+            logger("warn", "parseSettings", "The heat pump thinks it is using remote temperatures but this app did not")
+            clearRemoteTemperature()
+        }
+    }
 }
 
 def parseState(parsedState) {
@@ -352,7 +368,7 @@ def parseState(parsedState) {
     setIfNotNullAndChanged(parsedState?.vane, "heatPumpVane", "parseState")
     setIfNotNullAndChanged(parsedState?.wideVane, "heatPumpWideVane", "parseState")
     
-    if (parsedState?.compressorFrequency != null && state.heatPumpCompressorFrequency != parsedState?.compressorFrequency) {
+    if (parsedState?.compressorFrequency != null && state.heatPumpCompressorFrequency != parsedState.compressorFrequency) {
         logger("trace", "parseState", "setting heatPumpCompressorFrequency to ${parsedState.compressorFrequency}")
         state.heatPumpCompressorFrequency = parsedState.compressorFrequency 
     }
