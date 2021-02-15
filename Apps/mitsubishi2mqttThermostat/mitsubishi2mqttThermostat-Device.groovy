@@ -192,9 +192,9 @@ def clearRemoteTemperature() {
 }
 
 def setRemoteTemperature(value) {
-    // Don't update duplicate temperatures more than every five minutes.
+    // Don't update duplicate temperatures more than every minute.
     synchronized(this) {
-        if (value != state.lastRemoteTemperature || (state.lastRemoteTemperatureTime < (now() - 300000))) {
+        if (value != state.lastRemoteTemperature || (state.lastRemoteTemperatureTime < (now() - 60000))) {
             state.lastRemoteTemperatureTime = now()
             state.lastRemoteTemperature = value
             logger("trace", "setRemoteTemperature", "set remote_temp to ${value}")
@@ -324,16 +324,6 @@ def parseSettings(parsedSettings) {
         location.temperatureScale != parsedSettings.temperatureUnit) {
         logger("warn", "parseSettings", "Your hub is set to degrees ${location.temperatureScale} but this device reports using degrees ${parsedSettings.temperatureUnit}")
     }
-
-    if (parsedSettings?.temperatureSource != null) {
-        if (parsedSettings.temperatureSource == "local" && state.lastRemoteTemperatureTime != null) {
-            logger("warn", "parseSettings", "The heat pump has reverted to using local temperature readings")
-            clearRemoteTemperature()
-        } else if (parsedSettings.temperatureSource == "remote" && state.lastRemoteTemperatureTime == null) {
-            logger("warn", "parseSettings", "The heat pump thinks it is using remote temperatures but this app did not")
-            clearRemoteTemperature()
-        }
-    }
 }
 
 def parseState(parsedState) {
@@ -371,6 +361,16 @@ def parseState(parsedState) {
     if (parsedState?.compressorFrequency != null && state.heatPumpCompressorFrequency != parsedState.compressorFrequency) {
         logger("trace", "parseState", "setting heatPumpCompressorFrequency to ${parsedState.compressorFrequency}")
         state.heatPumpCompressorFrequency = parsedState.compressorFrequency 
+    }    
+
+    if (parsedState?.temperatureSource != null) {
+        if (parsedState.temperatureSource == "local" && state.lastRemoteTemperatureTime != null) {
+            logger("warn", "parseState", "The heat pump has reverted to using local temperature readings")
+            clearRemoteTemperature()
+        } else if (parsedState.temperatureSource == "remote" && state.lastRemoteTemperatureTime == null) {
+            logger("warn", "parseState", "The heat pump thinks it is using remote temperatures but this app did not")
+            clearRemoteTemperature()
+        }
     }
 
     checkRemoteTemperatureForStaleness()
