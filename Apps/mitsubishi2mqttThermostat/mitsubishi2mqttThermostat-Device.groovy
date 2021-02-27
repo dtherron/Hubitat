@@ -164,19 +164,19 @@ def installed() {
     
 	updateDataValue("lastRunningMode", "off")	
 
-    getParentSettings()
-	disconnect()
-	connect()
+    updated()
 }
 
 //************************************************************
 //************************************************************
 def updated() {
-    logger("info", "updated", "Device settings updated.")
-    // TODO: make getParentSettings tell us if any settings changed
-    getParentSettings()
-	disconnect()
-	connect()	
+    if (getParentSettings()) {
+        logger("info", "updated", "Device settings updated.")
+    	disconnect()
+        runIn(3, "connect")
+    } else {
+        logger("trace", "updated", "Device settings not actually updated.")
+    }
 }
 
 // ========================================================
@@ -184,33 +184,29 @@ def updated() {
 // ========================================================
 def clearRemoteTemperature() {
     if (state.lastRemoteTemperature != null) {
-        logger("debug", "clearRemoteTemperature", "resetting remote temp to 0")
-        publishMqtt("remote_temp/set", "0")
         state.lastRemoteTemperatureTime = null
         state.lastRemoteTemperature = null
+        logger("debug", "clearRemoteTemperature", "resetting remote temp to 0")
+        publishMqtt("remote_temp/set", "0")
     }
 }
 
 def setRemoteTemperature(value) {
     // Don't update duplicate temperatures more than every minute.
-    synchronized(this) {
-        if (value != state.lastRemoteTemperature || (state.lastRemoteTemperatureTime < (now() - 60000))) {
-            state.lastRemoteTemperatureTime = now()
-            state.lastRemoteTemperature = value
-            logger("trace", "setRemoteTemperature", "set remote_temp to ${value}")
-            publishMqtt("remote_temp/set", "${value}")
-        } else {
-            logger("trace", "setRemoteTemperature", "remote remote_temp unchaged at ${value}")
-        }
+    if (value != state.lastRemoteTemperature || (state.lastRemoteTemperatureTime < (now() - 60000))) {
+        state.lastRemoteTemperatureTime = now()
+        state.lastRemoteTemperature = value
+        logger("trace", "setRemoteTemperature", "set remote_temp to ${value}")
+        publishMqtt("remote_temp/set", "${value}")
+    } else {
+        logger("trace", "setRemoteTemperature", "remote remote_temp unchaged at ${value}")
     }
 }
 
 def checkRemoteTemperatureForStaleness() {
-    synchronized(this) {
-        if (state.lastRemoteTemperatureTime != null && (state.lastRemoteTemperatureTime < (now() - 3600000))) {
-            logger("warn", "checkRemoteTemperatureForStaleness", "resetting remote temp to 0 due to no data from sensors in over an hour")
-            clearRemoteTemperature()
-        }
+    if (state.lastRemoteTemperatureTime != null && (state.lastRemoteTemperatureTime < (now() - 3600000))) {
+        logger("warn", "checkRemoteTemperatureForStaleness", "resetting remote temp to 0 due to no data from sensors in over an hour")
+        clearRemoteTemperature()
     }
 }
 
@@ -219,10 +215,8 @@ def checkRemoteTemperatureForStaleness() {
 // ========================================================
 
 def subscribe(topic) {
-    synchronized(this) {
-        if (notMqttConnected()) {
-            connect()
-        }
+    if (notMqttConnected()) {
+        connect()
     }
     
     logger("info", "subscribe", "full topic: ${getTopicPrefix()}${topic}")
@@ -230,10 +224,8 @@ def subscribe(topic) {
 }
 
 def unsubscribe(topic) {
-    synchronized(this) {
-        if (notMqttConnected()) {
-            connect()
-        }
+    if (notMqttConnected()) {
+        connect()
     }
     
     logger("info", "unsubscribe", "full topic: ${getTopicPrefix()}${topic}")
@@ -466,22 +458,30 @@ def setThermostatMode(String value) {
 	}
 }
                              
-def getParentSetting(setting, type) {
+def boolean getParentSetting(setting, type) {
+    boolean valueChanged = false;
+
 	def inheritedValue = parent?.getInheritedSetting(setting)
-	if (inheritedValue != null) {
+	if (inheritedValue != settings[setting]) {
+        valueChanged = true;
         def displayValue = type == "password" ? "*******" : inheritedValue;
-        logger("trace", "getParentSetting", "Inheriting value ${displayValue} for ${setting} from parent")
+        logger("debug", "getParentSetting", "Inheriting value ${displayValue} for ${setting} from parent")
         device.updateSetting(setting, [value: inheritedValue, type: type])
-	}
+    } else {
+        logger("trace", "getParentSetting", "Unchanged value for ${setting} from parent")
+    }
+    
+    return valueChanged;
 }
 
-def getParentSettings() {
-	getParentSetting("brokerIp", "string")
-	getParentSetting("brokerPort", "string")
-	getParentSetting("brokerUser", "string")
-	getParentSetting("brokerPassword", "password")
-	getParentSetting("mqttTopic", "string")
-	getParentSetting("heatPumpFriendlyName", "string")
+// Returns true if any setting has changed that requires the MQTT connection to be reset
+def boolean getParentSettings() {
+	return getParentSetting("brokerIp", "string") ||
+    	getParentSetting("brokerPort", "string") ||
+	    getParentSetting("brokerUser", "string") ||
+	    getParentSetting("brokerPassword", "password") ||
+	    getParentSetting("mqttTopic", "string") ||
+	    getParentSetting("heatPumpFriendlyName", "string")
 }
 
 def normalize(name) {
