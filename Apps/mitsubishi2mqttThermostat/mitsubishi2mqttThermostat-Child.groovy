@@ -138,33 +138,36 @@ def initialize(thermostatInstance) {
 
 	// Log level was set to a higher level than 3, drop level to 3 in x number of minutes
 	if (loggingLevel > 3) {
-		logger("debug", "initialize", "Initialize runIn $settings.logDropLevelTime")
+		logger("debug", "initialize", "Revert log level to default in $settings.logDropLevelTime minutes")
 		runIn(settings.logDropLevelTime.toInteger() * 60, logsDropLevel)
 	}
 
     logger("info", "initialize", "App logging level set to $loggingLevel")
 	logger("info", "initialize", "Initialize LogDropLevelTime: $settings.logDropLevelTime")
 
+    state.lastOutsideTempSensorsTime = null;
+    state.lastOutsideTemp = null
+
     if (remoteTempSensors == null) {
         if (state.lastRemoteTempSensorsValue != "") {
             state.lastRemoteTempSensorsValue = "";
-            logger("debug", "initialize", "clearing remote sensors to [${state.lastRemoteTempSensorsValue}]")
-            unsubscribe()
+            logger("debug", "initialize", "clearing remote sensors")
+            unsubscribe(remoteTemperatureHandler)
             thermostatInstance.clearRemoteTemperature() // Clear any lingering value
         }
     } else if (remoteTempSensors.toString() != state.lastRemoteTempSensorsValue) {
         state.lastRemoteTempSensorsValue = remoteTempSensors.toString();
         logger("trace", "initialize", "remote sensor change found")
-        unsubscribe()
+        unsubscribe(remoteTemperatureHandler)
         thermostatInstance.clearRemoteTemperature() // Clear any lingering value
     	
         // Remove any sensors chosen that are actually of this device type
         // TODO: figure out why the UI never updates to catch on to this
-        if (remoteTempSensors?.removeAll { device -> device.getDeviceNetworkId().startsWith("m2mt") }) {
-            logger("warn", "initialize", "Some remote sensors were ignored because they seem to be Mitsubishi2Mqtt child devices")
+        if (remoteTempSensors?.removeAll { device -> device.getTypeName() == "Mitsubishi2Mqtt Thermostat Device" }) {
+            logger("warn", "initialize", "Some remote sensors were ignored because are Mitsubishi2Mqtt child devices")
         }
 
-     	// Subscribe to the new sensor(s) and device
+     	// Subscribe to the new sensor(s)
         if (remoteTempSensors != null && remoteTempSensors.size() > 0) {
             logger("info", "initialize", "Initializing ${remoteTempSensors.size()} remote sensor(s)")
 
@@ -258,7 +261,7 @@ def updateRemoteTemperature(thermostatInstance) {
     logger("trace", "updateRemoteTemperature", "Checking ${remoteTempSensors.size()} for presence to update remote temp")
 	for(sensor in remoteTempSensors) {
         if (sensor.currentValue("presence") == "present") {
-		    total += sensor.currentValue("temperature")
+		    total += sensor.currentValue("temperature") // TODO: figure out what to do for unit C vs F
 		    count++;
         }
 	}
@@ -268,6 +271,32 @@ def updateRemoteTemperature(thermostatInstance) {
     if (count > 0) {
         logger("trace", "updateRemoteTemperature", "Setting remote temp to ${total / count}")
         thermostatInstance.setRemoteTemperature(total / count)
+    }
+}
+
+//************************************************************
+// updateOutsideTemp
+//     Update current outdoor temperature based on selected sensors
+//
+// Signature(s)
+//     updateOutsideTemp()
+//
+// Parameters
+//     temperature : number
+//
+// Returns
+//     None
+//
+//************************************************************
+def updateOutsideTemp(temperature) {
+    if (temperature == null) {
+        logger("trace", "updateOutsideTemp", "Outside temp unavailable")
+        state.lastOutsideTempSensorsTime = null
+        state.lastOutsideTemp = null
+    } else {
+        logger("trace", "updateOutsideTemp", "Outside temp set to ${temperature}")
+        state.lastOutsideTempSensorsTime = now()
+        state.lastOutsideTemp = temperature
     }
 }
 
