@@ -66,7 +66,11 @@ preferences {
 			)
 		}
 		
-		section("<b>Motion sensor(s) to detect somebody is home</b>"){
+		section("Outside temperature sensor(s) (average value will be used)"){
+			input "outsideTempSensors", "capability.temperatureMeasurement", title: "Outside temperature sensors", multiple: true, required: false
+		}
+
+        section("<b>Motion sensor(s) to detect somebody is home</b>"){
 			input "motionSensors", "capability.motionSensor", title: "Motion sensors", multiple: true, required: false
 		}
 
@@ -74,35 +78,113 @@ preferences {
 		section {
 			app(name: "thermostats", appName: "Mitsubishi2Mqtt Thermostat Child", namespace: "dtherron", title: "Add Mitsubishi2Mqtt Thermostat", multiple: true)
 		}
+
+        section("<b>Log Settings</b>") {
+			input (name: "logLevel", type: "enum", title: "Live Logging Level: Messages with this level and higher will be logged", options: [[0: 'Disabled'], [1: 'Error'], [2: 'Warning'], [3: 'Info'], [4: 'Debug'], [5: 'Trace']], defaultValue: 3)
+			input "logDropLevelTime", "decimal", title: "Drop down to Info Level Minutes", required: true, defaultValue: 5
+		}
 	}
 }
 
 def installed() {
-	log.debug "Installed"
+	logger("info", "installed")
 	state.presence = "home"
+    state.lastOutsideTempSensorsValue = "";
 	initialize()
 }
 
 def updated() {
-	log.debug "Updated"
+	logger("info", "updated")
 	state.presence = "home"
 	unsubscribe()
 	initialize()
 }
 
 def initialize() {
-	log.debug "Initializing; there are ${childApps.size()} child apps installed"
+	logger("info", "initialize", "Initializing; there are ${childApps.size()} child apps installed")
 
- 	// Subscribe to the new sensor(s) and device
+	// Log level was set to a higher level than 3, drop level to 3 in x number of minutes
+	if (loggingLevel > 3) {
+		logger("debug", "initialize", "Revert log level to default in $settings.logDropLevelTime minutes")
+		runIn(settings.logDropLevelTime.toInteger() * 60, logsDropLevel)
+	}
+
+    logger("info", "initialize", "App logging level set to $loggingLevel")
+	logger("info", "initialize", "Initialize LogDropLevelTime: $settings.logDropLevelTime")
+
+    // Subscribe to the motion sensor(s)
     if (motionSensors != null && motionSensors.size() > 0) {
-        log.debug "Initializing ${motionSensors.size()} motion sensor(s)"
+    	logger("info", "initialize", "Initializing ${motionSensors.size()} motion sensor(s)")
 	    subscribe(motionSensors, "motion.active", motionActiveHandler)
     }
 
-	childApps.each {child -> 
-		log.debug "  child app: ${child.label}"
+    // Subscribe to the outside temperature sensor(s)
+    if (outsideTempSensors == null) {
+        if (state.lastOutsideTempSensorsValue != "") {
+            state.lastOutsideTempSensorsValue = "";
+            logger("debug", "initialize", "clearing outside sensors")
+            unsubscribe(outsideTemperatureHandler)
+            updateOutsideTemperature() // Clear any lingering value
+        }
+    } else if (outsideTempSensors.toString() != state.lastOutsideTempSensorsValue) {
+        state.lastOutsideTempSensorsValue = outsideTempSensors.toString();
+        logger("trace", "initialize", "outside sensor change found")
+        unsubscribe(outsideTemperatureHandler)
+    	
+        // Remove any sensors chosen that are actually of this device type
+        // TODO: figure out why the UI never updates to catch on to this
+        if (outsideTempSensors?.removeAll { device -> device.getTypeName() == "Mitsubishi2Mqtt Thermostat Device" }) {
+            logger("warn", "initialize", "Some outside sensors were ignored because they seem to be Mitsubishi2Mqtt child devices")
+        }
+
+     	// Subscribe to the new sensor(s)
+        if (outsideTempSensors != null && outsideTempSensors.size() > 0) {
+            logger("info", "initialize", "Initializing ${outsideTempSensors.size()} outside sensor(s)")
+        	subscribe(outsideTempSensors, outsideTemperatureHandler, ["filterEvents": false])
+        }
+
+        // Update the temperature with these new sensors
+	    updateOutsideTemperature()    
+    }
+
+    childApps.each {child -> 
+    	logger("debug", "initialize", "Updating child app: ${child.label}")
         child.updated()
 	}
+}
+
+def outsideTemperatureHandler(evt)
+{
+	logger("trace", "outsideTemperatureHandler", "Got event: ${evt.name}, ${evt.value}")
+	updateOutsideTemperature()
+}
+
+def updateOutsideTemperature() {
+	def total = 0;
+	def count = 0;
+	
+	// Average across all sensors, but ignore any not reporting as present
+    logger("trace", "updateOutsideTemperature", "Checking ${outsideTempSensors?.size()} for presence to update outside temp")
+	for(sensor in outsideTempSensors) {
+        logger("trace", "updateOutsideTemperature", "Checking sensor of type ${sensor.getTypeName()}")
+        if (sensor.getTypeName() == "OpenWeatherMap" || sensor.currentValue("presence") == "present") {
+		    total += sensor.currentValue("temperature") // TODO: figure out what to do for unit C vs F
+		    count++;
+        }
+	}
+	
+    // Only send an update if we have data
+    logger("trace", "updateOutsideTemperature", "Found ${count} valid outside temperatures")
+    if (count > 0) {
+        logger("trace", "updateOutsideTemperature", "Setting outside temp to ${total / count}")
+
+        def outsideTemp = total / count
+        
+        childApps.each {child -> 
+        	logger("debug", "updateOutsideTemperature", "Updating child app: ${child.label}")
+            child.updateOutsideTemp(outsideTemp)
+	    }
+    }
 }
 
 def setPresence(state) {
@@ -110,10 +192,43 @@ def setPresence(state) {
 }
 
 def motionActiveHandler(evt) {
-	log.debug "Motion detected on a sensor"
+    logger("debug", "motionActiveHandler", "Motion detected on a sensor")
 	state.presenceOverride = true // add timeout
 }
 
 def getInheritedSetting(setting) {
     return settings."${setting}"
+}
+
+def logger(level, source) {
+    logger(level, source, "")
+}
+
+def logger(level, source, msg) {
+    def loggingLevel = settings.logLevel.toInteger()
+	switch(level) {
+		case "error":
+			if (loggingLevel >= 1) log.error "[${source}] ${msg}"
+			break
+
+		case "warn":
+			if (loggingLevel >= 2) log.warn "[${source}] ${msg}"
+			break
+
+		case "info":
+			if (loggingLevel >= 3) log.info "[${source}] ${msg}"
+			break
+
+		case "debug":
+			if (loggingLevel >= 4) log.debug "[${source}] ${msg}"
+			break
+
+		case "trace":
+			if (loggingLevel >= 5) log.trace "[${source}] ${msg}"
+			break
+
+		default:
+			log.debug "[${source}] ${msg}"
+			break
+	}
 }

@@ -35,6 +35,8 @@ metadata {
 
         command "setThermostatFanMode", [[name:"Fan mode (ignore above)", type: "ENUM", description:"Set the heat pump's fan speed setting", constraints: ["QUIET", "AUTO", "1", "2", "3", "4"]]]
         command "setHeatPumpVane", ["string"]
+        command "enableSmartMode"
+        command "disableSmartMode"
         
         attribute "temperatureUnit", "ENUM", ["C", "F"]
         attribute "heatPumpVane", "ENUM", ["AUTO", "SWING", "1", "2", "3", "4", "5"]
@@ -143,7 +145,23 @@ def fanOn() { logger("warn", "COMMAND", "command fanOn not available on this dev
 def fanAuto() { logger("warn", "COMMAND", "command fanAuto not available on this device") }
 def emergencyHeat() { logger("warn", "COMMAND", "command emergencyHeat not available on this device") }
 def setSchedule(schedule) { logger("warn", "COMMAND", "setSchedule not available on this device") } 
-                                           
+                                    
+def enableSmartMode() {
+    if (!state.smartMode) {
+          logger("info", "enableSmartMode", "setSmartMode enabled")
+          state.smartMode = true
+          runEvery1Minute(smartModeCheck)
+    }
+}
+
+def disableSmartMode() {
+    if (state.smartMode) {
+          logger("info", "disableSmartMode", "setSmartMode disabled")
+          state.smartMode = false
+          unschedule(smartModeCheck)
+    }
+}
+
 //************************************************************
 //************************************************************
 def installed() {
@@ -177,6 +195,13 @@ def updated() {
     } else {
         logger("trace", "updated", "Device settings not actually updated.")
     }
+}
+
+// ========================================================
+// Smart mode
+// ========================================================
+def smartModeCheck() {
+    logger("info", "smartModeCheck", "Evaluating conditions")
 }
 
 // ========================================================
