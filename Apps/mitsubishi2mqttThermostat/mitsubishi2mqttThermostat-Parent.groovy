@@ -66,6 +66,10 @@ preferences {
 			)
 		}
 		
+		section("<b>Motion sensor(s) to detect somebody is home</b>"){
+			input "motionSensors", "capability.motionSensor", title: "Motion sensors", multiple: true, required: false
+		}
+
 		section("<b>Configure devices</b>") { }
 		section {
 			app(name: "thermostats", appName: "Mitsubishi2Mqtt Thermostat Child", namespace: "dtherron", title: "Add Mitsubishi2Mqtt Thermostat", multiple: true)
@@ -75,21 +79,39 @@ preferences {
 
 def installed() {
 	log.debug "Installed"
+	state.presence = "home"
 	initialize()
 }
 
 def updated() {
 	log.debug "Updated"
+	state.presence = "home"
 	unsubscribe()
 	initialize()
 }
 
 def initialize() {
 	log.debug "Initializing; there are ${childApps.size()} child apps installed"
+
+ 	// Subscribe to the new sensor(s) and device
+    if (motionSensors != null && motionSensors.size() > 0) {
+        log.debug "Initializing ${motionSensors.size()} motion sensor(s)"
+	    subscribe(motionSensors, "motion.active", motionActiveHandler)
+    }
+
 	childApps.each {child -> 
 		log.debug "  child app: ${child.label}"
         child.updated()
 	}
+}
+
+def setPresence(state) {
+	state.presence = state;
+}
+
+def motionActiveHandler(evt) {
+	log.debug "Motion detected on a sensor"
+	state.presenceOverride = true // add timeout
 }
 
 def getInheritedSetting(setting) {

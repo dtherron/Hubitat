@@ -74,6 +74,8 @@ def installed() {
 	// Generate a random DeviceID
 	state.deviceID = "m2mt" + Math.abs(new Random().nextInt() % 9999) + "_" + (now() % 9999)
 
+    state.lastRemoteTempSensorsValue = "";
+    
 	//Create Mitsubishi2Mqtt Thermostat device
 	def thermostat
 	def label = app.getLabel()
@@ -82,7 +84,8 @@ def installed() {
 		//** Should we add isComponent in the properties of the child device to make sure we can't remove the Device, will this make it that we can't change settings in it? 
 		thermostat = addChildDevice("dtherron", "Mitsubishi2Mqtt Thermostat Device", state.deviceID, [label: label, name: label, completedSetup: true])
 	} catch(e) {
-		logger("error", "installed", "Error adding Mitsubishi2Mqtt Thermostat child ${label}: ${e}")	}
+		logger("error", "installed", "Error adding Mitsubishi2Mqtt Thermostat child ${label}: ${e}")	
+    }
 
     updated()
 }
@@ -142,28 +145,39 @@ def initialize(thermostatInstance) {
     logger("info", "initialize", "App logging level set to $loggingLevel")
 	logger("info", "initialize", "Initialize LogDropLevelTime: $settings.logDropLevelTime")
 
-    unsubscribe()
-    thermostatInstance.clearRemoteTemperature() // Clear any lingering value
+    if (remoteTempSensors == null) {
+        if (state.lastRemoteTempSensorsValue != "") {
+            state.lastRemoteTempSensorsValue = "";
+            logger("debug", "initialize", "clearing remote sensors to [${state.lastRemoteTempSensorsValue}]")
+            unsubscribe()
+            thermostatInstance.clearRemoteTemperature() // Clear any lingering value
+        }
+    } else if (remoteTempSensors.toString() != state.lastRemoteTempSensorsValue) {
+        state.lastRemoteTempSensorsValue = remoteTempSensors.toString();
+        logger("trace", "initialize", "remote sensor change found")
+        unsubscribe()
+        thermostatInstance.clearRemoteTemperature() // Clear any lingering value
     	
-    // Remove any sensors chosen that are actually of this device type
-    // TODO: figure out why the UI never updates to catch on to this
-    if (remoteTempSensors?.removeAll { device -> device.getDeviceNetworkId().startsWith("m2mt") }) {
-        logger("warn", "initialize", "Some remote sensors were ignored because they seem to be Mitsubishi2Mqtt child devices")
+        // Remove any sensors chosen that are actually of this device type
+        // TODO: figure out why the UI never updates to catch on to this
+        if (remoteTempSensors?.removeAll { device -> device.getDeviceNetworkId().startsWith("m2mt") }) {
+            logger("warn", "initialize", "Some remote sensors were ignored because they seem to be Mitsubishi2Mqtt child devices")
+        }
+
+     	// Subscribe to the new sensor(s) and device
+        if (remoteTempSensors != null && remoteTempSensors.size() > 0) {
+            logger("info", "initialize", "Initializing ${remoteTempSensors.size()} remote sensor(s)")
+
+            // Get all events from the remote sensors. This way even if the temp is constant
+            // we have a better signal that the sensors are still online. The device client 
+            // will eventually revert to using the device temp if it stops getting updates.
+        	subscribe(remoteTempSensors, remoteTemperatureHandler, ["filterEvents": false])
+
+            // Update the temperature with these new sensors
+	        updateRemoteTemperature(thermostatInstance)
+        }
     }
-
- 	// Subscribe to the new sensor(s) and device
-    if (remoteTempSensors != null && remoteTempSensors.size() > 0) {
-        logger("info", "initialize", "Initializing ${remoteTempSensors.size()} remote sensor(s)")
-
-        // Get all events from the remote sensors. This way even if the temp is constant
-        // we have a better signal that the sensors are still online. The device client 
-        // will eventually revert to using the device temp if it stops getting updates.
-    	subscribe(remoteTempSensors, remoteTemperatureHandler, ["filterEvents": false])
-
-        // Update the temperature with these new sensors
-	    updateRemoteTemperature(thermostatInstance)
-    }
-    
+        
 	// Set device settings if this is a new device
 	thermostatInstance.setLogLevel(loggingLevel)
     thermostatInstance.updated()
@@ -274,23 +288,23 @@ def logger(level, source, msg) {
     def loggingLevel = settings.logLevel.toInteger()
 	switch(level) {
 		case "error":
-			if (state.loggingLevel >= 1) log.error "[${source}] ${msg}"
+			if (loggingLevel >= 1) log.error "[${source}] ${msg}"
 			break
 
 		case "warn":
-			if (state.loggingLevel >= 2) log.warn "[${source}] ${msg}"
+			if (loggingLevel >= 2) log.warn "[${source}] ${msg}"
 			break
 
 		case "info":
-			if (state.loggingLevel >= 3) log.info "[${source}] ${msg}"
+			if (loggingLevel >= 3) log.info "[${source}] ${msg}"
 			break
 
 		case "debug":
-			if (state.loggingLevel >= 4) log.debug "[${source}] ${msg}"
+			if (loggingLevel >= 4) log.debug "[${source}] ${msg}"
 			break
 
 		case "trace":
-			if (state.loggingLevel >= 5) log.trace "[${source}] ${msg}"
+			if (loggingLevel >= 5) log.trace "[${source}] ${msg}"
 			break
 
 		default:
