@@ -66,7 +66,7 @@ preferences {
 			)
 		}
 		
-		section("Outside temperature sensor(s) (average value will be used)"){
+		section("<b>Outside temperature sensor(s) (average value will be used) for smart mode</b>"){
 			input "outsideTempSensors", "capability.temperatureMeasurement", title: "Outside temperature sensors", multiple: true, required: false
 		}
 
@@ -134,13 +134,13 @@ def initialize() {
         // Remove any sensors chosen that are actually of this device type
         // TODO: figure out why the UI never updates to catch on to this
         if (outsideTempSensors?.removeAll { device -> device.getTypeName() == "Mitsubishi2Mqtt Thermostat Device" }) {
-            logger("warn", "initialize", "Some outside sensors were ignored because they seem to be Mitsubishi2Mqtt child devices")
+            logger("warn", "initialize", "Some outside sensors were ignored because they are Mitsubishi2Mqtt child devices")
         }
 
      	// Subscribe to the new sensor(s)
         if (outsideTempSensors != null && outsideTempSensors.size() > 0) {
             logger("info", "initialize", "Initializing ${outsideTempSensors.size()} outside sensor(s)")
-        	subscribe(outsideTempSensors, outsideTemperatureHandler, ["filterEvents": false])
+        	subscribe(outsideTempSensors, "temperature", outsideTemperatureHandler)
         }
 
         // Update the temperature with these new sensors
@@ -167,7 +167,7 @@ def updateOutsideTemperature() {
     logger("trace", "updateOutsideTemperature", "Checking ${outsideTempSensors?.size()} for presence to update outside temp")
 	for(sensor in outsideTempSensors) {
         logger("trace", "updateOutsideTemperature", "Checking sensor of type ${sensor.getTypeName()}")
-        if (sensor.getTypeName() == "OpenWeatherMap" || sensor.currentValue("presence") == "present") {
+        if (sensor.getTypeName().startsWith("OpenWeatherMap") || sensor.currentValue("presence") == "present") {
 		    total += sensor.currentValue("temperature") // TODO: figure out what to do for unit C vs F
 		    count++;
         }
