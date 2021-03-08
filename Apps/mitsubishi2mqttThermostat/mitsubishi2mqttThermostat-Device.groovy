@@ -23,14 +23,14 @@ public static String version() { return "v1.0.0" }
 public static String rootTopic() { return "hubitat" }
 
 metadata {
-	definition (name: "Mitsubishi2Mqtt Thermostat Device", 
-		namespace: "dtherron", 
-		author: "Dan Herron",
-		importUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-Device.groovy") {
-		
-		capability "Thermostat"
-		capability "Sensor"
-		capability "Actuator"
+    definition (name: "Mitsubishi2Mqtt Thermostat Device", 
+        namespace: "dtherron", 
+        author: "Dan Herron",
+        importUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2mqttThermostat/mitsubishi2mqttThermostat-Device.groovy") {
+        
+        capability "Thermostat"
+        capability "Sensor"
+        capability "Actuator"
         capability "Temperature Measurement"
 
         command "setThermostatFanMode", [[name:"Fan mode (ignore above)", type: "ENUM", description:"Set the heat pump's fan speed setting", constraints: ["quiet", "auto", "1", "2", "3", "4"]]]
@@ -40,58 +40,58 @@ metadata {
         attribute "heatPumpVane", "ENUM", ["auto", "swing", "1", "2", "3", "4", "5"]
         attribute "heatPumpWideVane", "ENUM", ["swing", "<<", "<", "|", ">", ">>", "<>"]
 
-		preferences {
-			input(
-		        name: "brokerIp", 
-		        type: "string",
-				title: "MQTT Broker IP Address",
-				description: "e.g. 192.168.1.200",
-				required: true,
-				displayDuringSetup: true
-			)
-			input(
-		        name: "brokerPort", 
-		        type: "string",
-				title: "MQTT Broker Port",
-				description: "e.g. 1883",
-				required: true,
-				displayDuringSetup: true
-			)
-		    input(
-		        name: "brokerUser", 
-		        type: "string",
-				title: "MQTT Broker Username",
-				description: "e.g. mqtt_user",
-				required: false,
-				displayDuringSetup: true
-			)
-		    input(
-		        name: "brokerPassword", 
-		        type: "password",
-				title: "MQTT Broker Password",
-				description: "e.g. ^L85er1Z7g&%2En!",
-				required: false,
-				displayDuringSetup: true
-			)
-			input(
-		        name: "mqttTopic", 
-		        type: "string",
-				title: "MQTT topic specified heat pump's configuration",
-				description: "e.g. mitsubishi2mqtt",
-				defaultValiue: "mitsubishi2mqtt",
-				required: true,
-				displayDuringSetup: true
-			)
-			input(
-		        name: "heatPumpFriendlyName", 
-		        type: "string",
-				title: "Friendly Name specified in your heat pump's configuration",
-				description: "e.g. UpstairsHeat",
-				required: true,
-				displayDuringSetup: true
-			)
+        preferences {
+            input(
+                name: "brokerIp", 
+                type: "string",
+                title: "MQTT Broker IP Address",
+                description: "e.g. 192.168.1.200",
+                required: true,
+                displayDuringSetup: true
+            )
+            input(
+                name: "brokerPort", 
+                type: "string",
+                title: "MQTT Broker Port",
+                description: "e.g. 1883",
+                required: true,
+                displayDuringSetup: true
+            )
+            input(
+                name: "brokerUser", 
+                type: "string",
+                title: "MQTT Broker Username",
+                description: "e.g. mqtt_user",
+                required: false,
+                displayDuringSetup: true
+            )
+            input(
+                name: "brokerPassword", 
+                type: "password",
+                title: "MQTT Broker Password",
+                description: "e.g. ^L85er1Z7g&%2En!",
+                required: false,
+                displayDuringSetup: true
+            )
+            input(
+                name: "mqttTopic", 
+                type: "string",
+                title: "MQTT topic specified heat pump's configuration",
+                description: "e.g. mitsubishi2mqtt",
+                defaultValiue: "mitsubishi2mqtt",
+                required: true,
+                displayDuringSetup: true
+            )
+            input(
+                name: "heatPumpFriendlyName", 
+                type: "string",
+                title: "Friendly Name specified in your heat pump's configuration",
+                description: "e.g. UpstairsHeat",
+                required: true,
+                displayDuringSetup: true
+            )
         }
-	}
+    }
 }
 
 def auto() { 
@@ -150,19 +150,19 @@ def installed() {
     logger("info", "installed", "Device installed. Initializing to defaults.")
 
     sendEvent(name: "supportedThermostatFanModes", value: ["auto", "quiet", "1", "2", "3", "4"], isStateChange: true)
-	sendEvent(name: "supportedThermostatModes", value: ["off", "auto", "heat", "cool"] , isStateChange: true)
-	sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
-	sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
-	sendEvent(name: "thermostatOperatingState", value: "idle", isStateChange: true)
-	sendEvent(name: "thermostatSetpoint", value: 68, isStateChange: true)
-	sendEvent(name: "heatingSetpoint", value: 68, isStateChange: true)
-	sendEvent(name: "coolingSetpoint", value: 68, isStateChange: true)
+    sendEvent(name: "supportedThermostatModes", value: ["off", "auto", "heat", "cool"] , isStateChange: true)
+    sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
+    sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
+    sendEvent(name: "thermostatOperatingState", value: "idle", isStateChange: true)
+    sendEvent(name: "thermostatSetpoint", value: 68, isStateChange: true)
+    sendEvent(name: "heatingSetpoint", value: 68, isStateChange: true)
+    sendEvent(name: "coolingSetpoint", value: 68, isStateChange: true)
     sendEvent(name: "temperature", value: 68, isStateChange: true)
     sendEvent(name: "heatPumpWideVane", value: "swing", isStateChange: true)
     sendEvent(name: "heatPumpVane", value: "auto", isStateChange: true)
     sendEvent(name: "temperatureUnit", value: location.temperatureScale, isStateChange: true)
     
-	updateDataValue("lastRunningMode", "heat")	
+    updateDataValue("lastRunningMode", "heat")    
 
     updated()
 }
@@ -172,7 +172,7 @@ def installed() {
 def updated() {
     if (getParentSettings()) {
         logger("info", "updated", "Device settings updated.")
-    	disconnect()
+        disconnect()
         runIn(3, "connect")
     } else {
         logger("trace", "updated", "Device settings not actually updated.")
@@ -206,11 +206,11 @@ def handleAppThermostatFanMode(fanMode, requestOff) {
             logger("info", "handleAppThermostatFanMode", "turning unit back on to $lastRunningMode")
             setThermostatMode(lastRunningMode)
         }
-        
-        if (currentFanMode != fanMode) {
-            logger("info", "handleAppThermostatFanMode", "set fan to $fanMode")
-            publishMqtt("fan/set", fanMode)
-        }
+    }
+    
+    if (currentFanMode != fanMode) {
+        logger("info", "handleAppThermostatFanMode", "set fan to $fanMode")
+        publishMqtt("fan/set", fanMode)
     }
 }
 
@@ -290,7 +290,7 @@ def connect() {
 
     subscribe("state")
     subscribe("settings")
-	// subscribe("debug")
+    // subscribe("debug")
 }
 
 def disconnect() {
@@ -337,19 +337,21 @@ def setIfNotNullAndChanged(newValue, attributeName, sourceMethod, boolean forceL
 }
 
 def parseSettings(parsedSettings) {
+    def currentMode = device.currentValue("thermostatMode")
     if (setIfNotNullAndChanged(parsedSettings?.mode, "thermostatMode", "parseSettings")) {
-        if (parsedSettings.mode.toLowerCase() != "off") {
-            updateDataValue("lastRunningMode", parsedSettings.mode.toLowerCase())	
+        currentMode = parsedSettings.mode.toLowerCase()
+        if (currentMode != "off") {
+            updateDataValue("lastRunningMode", parsedSettings.mode.toLowerCase())    
         }
         logger("info", "parseSettings", "Mode changed to ${parsedSettings.mode}")
     }
 
     if (setIfNotNullAndChanged(parsedSettings?.temperature, "thermostatSetpoint", "parseSettings")) {
         logger("info", "parseSettings", "Set point changed to ${parsedSettings.temperature}")
-        if (device.currentValue("thermostatMode") == "heat") {
+        if (currentMode == "heat") {
             logger("trace", "parseSettings", "setting heatingSetpoint to ${parsedSettings.temperature}")
             sendEvent(name: "heatingSetpoint", value: parsedSettings.temperature) 
-        } else if (device.currentValue("thermostatMode") == "cool") {
+        } else if (currentMode == "cool") {
             logger("trace", "parseSettings", "setting coolingSetpoint to ${parsedSettings.temperature}")
             sendEvent(name: "coolingSetpoint", value: parsedSettings.temperature) 
         }
@@ -365,19 +367,21 @@ def parseSettings(parsedSettings) {
 }
 
 def parseState(parsedState) {
+    def currentMode = device.currentValue("thermostatMode")
     if (setIfNotNullAndChanged(parsedState?.mode, "thermostatMode", "parseState")) {
         logger("info", "parseState", "lastRunningMode changed to ${parsedState.mode}")
-        if (parsedState.mode.toLowerCase() != "off") {
-            updateDataValue("lastRunningMode", parsedState.mode.toLowerCase())	
+        currentMode = parsedState.mode.toLowerCase()
+        if (currentMode != "off") {
+            updateDataValue("lastRunningMode", parsedState.mode.toLowerCase())    
         }
     }
 
     if (setIfNotNullAndChanged(parsedState?.temperature, "thermostatSetpoint", "parseState")) {
         logger("info", "parseState", "Set point changed to ${parsedState.temperature}")
-        if (device.currentValue("thermostatMode") == "heat") {
+        if (currentMode == "heat") {
             logger("trace", "parseState", "setting heatingSetpoint to ${parsedState.temperature}")
             sendEvent(name: "heatingSetpoint", value: parsedState.temperature) 
-        } else if (device.currentValue("thermostatMode") == "cool") {
+        } else if (currentMode == "cool") {
             logger("trace", "parseState", "setting coolingSetpoint to ${parsedState.temperature}")
             sendEvent(name: "coolingSetpoint", value: parsedState.temperature) 
         }
@@ -445,31 +449,31 @@ def publishMqtt(topic, payload, qos = 0, retained = false) {
 //************************************************************
 def logger(level, source, msg) {
 
-	switch(level) {
-		case "error":
-			if (state.loggingLevel >= 1) log.error "[${source}] ${msg}"
-			break
+    switch(level) {
+        case "error":
+            if (state.loggingLevel >= 1) log.error "[${source}] ${msg}"
+            break
 
-		case "warn":
-			if (state.loggingLevel >= 2) log.warn "[${source}] ${msg}"
-			break
+        case "warn":
+            if (state.loggingLevel >= 2) log.warn "[${source}] ${msg}"
+            break
 
-		case "info":
-			if (state.loggingLevel >= 3) log.info "[${source}] ${msg}"
-			break
+        case "info":
+            if (state.loggingLevel >= 3) log.info "[${source}] ${msg}"
+            break
 
-		case "debug":
-			if (state.loggingLevel >= 4) log.debug "[${source}] ${msg}"
-			break
+        case "debug":
+            if (state.loggingLevel >= 4) log.debug "[${source}] ${msg}"
+            break
 
-		case "trace":
-			if (state.loggingLevel >= 5) log.trace "[${source}] ${msg}"
-			break
+        case "trace":
+            if (state.loggingLevel >= 5) log.trace "[${source}] ${msg}"
+            break
 
-		default:
-			log.debug "[${source}] ${msg}"
-			break
-	}
+        default:
+            log.debug "[${source}] ${msg}"
+            break
+    }
 }
 
 
@@ -484,8 +488,8 @@ def logger(level, source, msg) {
 //     None
 //************************************************************
 def setLogLevel(level) {
-	state.loggingLevel = level.toInteger()
-	logger("warn", "setLogLevel", "Device logging level set to $state.loggingLevel")
+    state.loggingLevel = level.toInteger()
+    logger("warn", "setLogLevel", "Device logging level set to $state.loggingLevel")
 }
 
 def setThermostatMode(String value) {
@@ -494,14 +498,14 @@ def setThermostatMode(String value) {
     } else if (value != device.currentValue("thermostatMode")) {
         logger("debug", "setThermostatMode", "setThermostatMode to ${value}")
         publishMqtt("mode/set", value)
-	}
+    }
 }
                              
 def boolean getParentSetting(setting, type) {
     boolean valueChanged = false;
 
-	def inheritedValue = parent?.getInheritedSetting(setting)
-	if (inheritedValue != settings[setting]) {
+    def inheritedValue = parent?.getInheritedSetting(setting)
+    if (inheritedValue != settings[setting]) {
         valueChanged = true;
         def displayValue = type == "password" ? "*******" : inheritedValue;
         logger("debug", "getParentSetting", "Inheriting value ${displayValue} for ${setting} from parent")
@@ -515,12 +519,12 @@ def boolean getParentSetting(setting, type) {
 
 // Returns true if any setting has changed that requires the MQTT connection to be reset
 def boolean getParentSettings() {
-	return getParentSetting("brokerIp", "string") ||
-    	getParentSetting("brokerPort", "string") ||
-	    getParentSetting("brokerUser", "string") ||
-	    getParentSetting("brokerPassword", "password") ||
-	    getParentSetting("mqttTopic", "string") ||
-	    getParentSetting("heatPumpFriendlyName", "string")
+    return getParentSetting("brokerIp", "string") ||
+        getParentSetting("brokerPort", "string") ||
+        getParentSetting("brokerUser", "string") ||
+        getParentSetting("brokerPassword", "password") ||
+        getParentSetting("mqttTopic", "string") ||
+        getParentSetting("heatPumpFriendlyName", "string")
 }
 
 def normalize(name) {
