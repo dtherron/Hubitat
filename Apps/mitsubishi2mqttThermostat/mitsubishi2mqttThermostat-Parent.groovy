@@ -73,8 +73,14 @@ preferences {
         section('<b>Extra devices to use</b>') {
             input 'openWeatherMap', 'device.OpenWeatherMap-AlertsWeatherDriver', title: '<i>OpenWeatherMap - Alerts Weather Driver</i> device used for outside temperature and weather conditions', multiple: false, required: false
             input 'outsideTempSensors', 'capability.temperatureMeasurement', title: 'Outside temperature sensors (will be averaged with OpenWeatherMap for outside temp)', multiple: true, required: false
-            input 'motionSensors', 'capability.motionSensor', title: 'Motion sensors (to detect somebody is home)', multiple: true, required: false
         }
+
+        section('<b>Home/away detection</b>') {
+            input 'motionSensors', 'capability.motionSensor', title: 'Motion sensors (to detect somebody is home)', multiple: true, required: false
+            input 'homeActivityLevel', 'device.VirtualOmniSensor', title: 'Where to log home activity level', multiple: false, required: false
+            input(name: 'nighttimeStart', type: 'string', title: 'Time when night begins', description: 'e.g. when you go to sleep, and away mode stops taking effect', required: true, defaultValue: "22:00")
+            input(name: 'nighttimeEnd', type: 'string', title: 'Time when night ends', description: 'e.g. when you wake up, and away mode starts taking effect', required: true, defaultValue: "06:00")
+         }
 
         section('<b>Log Settings</b>') {
             input (name: 'logLevel', type: 'enum', title: 'Live Logging Level: Messages with this level and higher will be logged', options: [[0: 'Disabled'], [1: 'Error'], [2: 'Warning'], [3: 'Info'], [4: 'Debug'], [5: 'Trace']], defaultValue: 3)
@@ -85,14 +91,12 @@ preferences {
 
 def installed() {
     logger('info', 'installed')
-    state.presence = 'home'
     state.lastOutsideTempSensorsValue = ''
     initialize()
 }
 
 def updated() {
     logger('info', 'updated')
-    state.presence = 'home'
     unsubscribe()
     initialize()
 }
@@ -100,7 +104,11 @@ def updated() {
 def initialize() {
     logger('info', 'initialize', "Initializing; there are ${childApps.size()} child apps installed")
 
+    // reset the motion sensor state data
+    state.motionSensorState = [:]
+
     // Log level was set to a higher level than 3, drop level to 3 in x number of minutes
+    loggingLevel = app.getSetting('logLevel').toInteger()
     if (loggingLevel > 3) {
         logger('debug', 'initialize', "Revert log level to default in $settings.logDropLevelTime minutes")
         runIn(settings.logDropLevelTime.toInteger() * 60, logsDropLevel)
@@ -113,6 +121,8 @@ def initialize() {
     if (motionSensors != null && motionSensors.size() > 0) {
         logger('info', 'initialize', "Initializing ${motionSensors.size()} motion sensor(s)")
         subscribe(motionSensors, 'motion.active', motionActiveHandler)
+        subscribe(motionSensors, 'motion.inactive', motionActiveHandler)
+        runEvery5Minutes(getRollingActivityLevel)
     }
 
     // Subscribe to the outside temperature sensor(s)
@@ -208,13 +218,103 @@ def updateOutsideConditions() {
     }
 }
 
-def setPresence(state) {
-    state.presence = state
+def motionActiveHandler(evt) {
+    def deviceId = evt.getDeviceId().toString()
+    def isActive = evt.value == 'active'
+    if (evt.value != 'active' && evt.value != 'inactive') {
+        logger('warn', 'motionActiveHandler', "Unexpected event ${evt.value} ignored")
+        return
+    }
+
+    def timeNow = now()
+    def sensorHistories = state.motionSensorState
+
+    logger('trace', 'motionActiveHandler', "Sensor $deviceId is ${evt.value} at $timeNow")
+
+    def sensorHistory = sensorHistories[deviceId]
+    if (sensorHistory == null) {
+        logger('debug', 'motionActiveHandler', "Initialize history to empty")
+        sensorHistory = []
+    } else {
+        // Remove anything more than 30 minutes old
+        sensorHistory.removeAll { entry -> entry[1] != null && entry[1] < (timeNow - 1800000) }
+    }
+    
+    if (isActive) {
+        sensorHistory << [timeNow, null]
+    } else if (sensorHistory.size() > 0) {
+        if (sensorHistory[-1][1] != null) {
+            logger('warn', 'motionActiveHandler', "Inactive time is already set for most recent activity on sensor $deviceId at $timeNow ($sensorHistory)")
+        }
+        sensorHistory[-1] = [sensorHistory[-1][0], timeNow]
+    }
+
+    sensorHistories[deviceId] = sensorHistory
+    logger('trace', 'motionActiveHandler', "Update $deviceId for ${evt.value} at $timeNow ($sensorHistory)")
 }
 
-def motionActiveHandler(evt) {
-    logger('debug', 'motionActiveHandler', 'Motion detected on a sensor')
-    state.presenceOverride = true // add timeout
+def getRollingActivityLevel() {
+    def timeNow = now()
+    def windowStartTime = timeNow - 1800000
+    def timeActive = 0
+
+    def sensorHistories = state.motionSensorState
+    sensorHistories.each { sensorHistoryKV ->
+        def sensorTimeActive = 0
+        def sensorHistory = sensorHistoryKV.value
+
+        sensorHistory.each { entry ->
+            def startTime = Math.min(timeNow, entry[0])
+            def endTime = entry[1] ? entry[1] : timeNow 
+            if (startTime >= windowStartTime) {
+                sensorTimeActive += (int) ((endTime - startTime) / 1000)
+            }
+        }
+        
+        logger('trace', 'getRollingActivityLevel', "Sensor ${sensorHistoryKV.key} level is $sensorTimeActive")
+    
+        timeActive += sensorTimeActive
+    }
+    
+    // max out at 30 minutes (in seconds)
+    timeActive = Math.min(1800, timeActive)
+    
+    def percentActive = (int) (100 * timeActive / 1800)
+    
+    logger('trace', 'getRollingActivityLevel', "Activity level is $timeActive or $percentActive")
+    homeActivityLevel.setVariable(percentActive)
+    
+    if (percentActive > 20) {
+        state.disableAwayModeUntil = now() + 1800000
+    } else if (percentActive > 50) {
+        state.disableAwayModeUntil = now() + 3600000
+    }
+}
+
+def allowAwayMode() {
+    def nowTime = Date.parse('HH:mm', new Date(now()).format('HH:mm'))
+    def nightStart = Date.parse('HH:mm', settings.nighttimeStart)
+    def nightEnd = Date.parse('HH:mm', settings.nighttimeEnd)
+        
+    if (nightStart < nightEnd) {
+        // Case when night goes from 1am to 5am
+        if (timeOfDayIsBetween(nightStart, nightEnd, nowTime)) {
+            return false;
+        }
+    } else {
+        // case when not-night goes from 6am to 10pm
+        if (!timeOfDayIsBetween(nightEnd, nightStart, nowTime)) {
+            return false;
+        }
+    }
+
+    // when the last real activity detected was too long ago
+    if (state.disableAwayModeUntil < now()) {
+        return false
+    }
+    
+    logger('trace', 'allowAwayMode', "Not nighttime and no recent activity -- allow away mode")
+    return true
 }
 
 def getInheritedSetting(setting) {
@@ -253,3 +353,25 @@ def logger(level, source, msg) {
             break
     }
 }
+
+//************************************************************
+// logsDropLevel
+//     Turn down logLevel to 3 in this app/device and log the change
+//
+// Signature(s)
+//     logsDropLevel()
+//
+// Parameters
+//     None
+//
+// Returns
+//     None
+//
+//************************************************************
+def logsDropLevel() {
+    app.updateSetting('logLevel', [type:'enum', value:'3'])
+
+    loggingLevel = app.getSetting('logLevel').toInteger()
+    logger('info', 'logsDropLevel', "App logging level set to $loggingLevel")
+}
+

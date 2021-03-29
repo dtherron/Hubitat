@@ -199,8 +199,8 @@ def initialize(thermostatInstance) {
         }
     }
 
-    unsubscribe(modeChanged)
-    subscribe(location, "mode", modeChanged)
+    unsubscribe(locationModeChanged)
+    subscribe(location, "mode", locationModeChanged)
 
     // Set device settings if this is a new device
     thermostatInstance.updated()
@@ -260,19 +260,19 @@ def scheduledUpdateCheck() {
     def currentMode = 'heat' // HACK HACK HACK    
     
     runIn(1, 'checkForTemperatureUpdate', [data: currentMode])
-    runIn(10, 'checkForFanUpdate', [data: currentMode])
+    runIn(60, 'checkForFanUpdate', [data: currentMode])
 }
 
-def modeChanged(evt) {
+def locationModeChanged(evt) {
     def newMode = evt.value
-    logger('trace', 'modeChanged', "Got mode change event to $newMode")
+    logger('trace', 'locationModeChanged', "Got mode change event to $newMode")
     scheduledUpdateCheck()
 }
 
 def checkForTemperatureUpdate(currentMode) {
     def thermostatInstance = getThermostat()
     def currentSetpoint = thermostatInstance.currentValue('thermostatSetpoint')
-    def userChangedTemp = currentSetpoint != state.lastRequestedTemp
+    def userChangedTemp = currentSetpoint != state.lastRequestedTemp && state.lastRequestedTemp != null && (thermostatInstance.wasLastTemperatureChangeByApp() == false)
 
     def timeNow = new Date(now()).format('HH:mm')
     def timeNowAsMinutesAfterMidnight = timeStringToMinutesAfterMidnight(timeNow)
@@ -291,33 +291,34 @@ def checkForTemperatureUpdate(currentMode) {
     } else if (userChangedTemp) {
         logger('debug', 'checkForTemperatureUpdate', "Manual change to temp to $currentSetpoint (from ${state.lastRequestedTemp}) is active")
         return
+    } else {
+        logger('trace', 'checkForTemperatureUpdate', "current active schedule entry: ${currentScheduleEntry[1]} -> $currentRequestedTemp")
     }
 
-    if (coldWeatherHeatBoost &&
-       state.lastWeatherExpectedHigh != null &&
-       state.lastWeatherExpectedHigh < 45) {
-        if (state.lastWeatherExpectedHigh < 40) {
-            logger('info', 'checkForTemperatureUpdate', "bumping temp two degrees because the high is below 40")
-            currentRequestedTemp++
-        } else {
-            logger('info', 'checkForTemperatureUpdate', "bumping temp one degree because the high is below 45")
+    if (coldWeatherHeatBoost && state.lastWeatherExpectedHigh != null) { 
+        if (state.lastWeatherExpectedHigh < 40 && state.lastWeatherExpectedLow < 32) {
+            logger('info', 'checkForTemperatureUpdate', "bumping temp two degrees because the high is below 40 and low below 32")
+            currentRequestedTemp += 2
+        } else if (state.lastWeatherExpectedHigh < 45 && state.lastWeatherExpectedLow < 34) {
+            logger('info', 'checkForTemperatureUpdate', "bumping temp one degree because the high is below 45 and low below 34")
             currentRequestedTemp++
         }
     }
     
-    def sns = getSunriseAndSunset(sunriseOffset: '1:00', sunsetOffset: '-1:00')
+    def sns = getSunriseAndSunset(sunriseOffset: '0:30', sunsetOffset: '-0:30')
     if (heatingSunBoost > 0 &&                                                // if this device has a sunboost
         currentMode == 'heat' &&                                              // and heating
         timeOfDayIsBetween(sns.sunrise, sns.sunset, new Date()) &&            // and it is peak day time
         state.lastWeatherCloudiness != null &&                                // and we have cloud data
-        state.lastWeatherCloudiness <= 60                                     // and it says it is fairly sunny
+        state.lastWeatherCloudiness <= 80                                     // and it says it is fairly sunny
     ) {
-        def sunReduction = (((60 - state.lastWeatherCloudiness) / 60) * heatingSunBoost).toDouble().round()
-        logger('info', 'checkForTemperatureUpdate', "sunny day -- reduce heat setting by $sunReduction")
+        def sunReduction = (((100 - state.lastWeatherCloudiness) / 80) * heatingSunBoost).toDouble().round()
+        logger('debug', 'checkForTemperatureUpdate', "sunny day -- reduce heat setting by $sunReduction")
         currentRequestedTemp -= sunReduction
     }
            
-    if (awayModeTempChange > 0 && location.currentMode.getName() == "Away") {
+    def allowAwayMode = parent?.allowAwayMode()
+    if (awayModeTempChange > 0 && location.currentMode.getName() == "Away" && allowAwayMode) {
         if (currentMode == 'heat') {
             logger('debug', 'checkForTemperatureUpdate', "house is set to Away. Lowering temperature by $awayModeTempChange")
             currentRequestedTemp -= awayModeTempChange
@@ -327,8 +328,24 @@ def checkForTemperatureUpdate(currentMode) {
         }
     }
 
-    if (currentRequestedTemp != state.lastRequestedTemp) {
-        logger('info', 'checkForTemperatureUpdate', "requesting to change temp from ${state.lastRequestedTemp} to $currentRequestedTemp")        
+    if (state.lastWeatherExpectedLow != null && state.lastWeatherExpectedLow < 32 && state.lastWeatherExpectedHigh < 45) {
+        def allowedMinTemp = 61;
+        if (state.lastWeatherExpectedLow < 30) {
+            allowedMinTemp = 62;
+        } else if (state.lastWeatherExpectedLow < 28) {
+            allowedMinTemp = 63;
+        } else if (state.lastWeatherExpectedLow < 26) {
+            allowedMinTemp = 64;
+        } 
+
+        if (currentRequestedTemp < allowedMinTemp) {
+            logger('debug', 'checkForTemperatureUpdate', "Expected low is below freezing. Increasing minimum temp to $allowedMinTemp")
+            currentRequestedTemp = allowedMinTemp
+        }
+    }
+
+    if (currentRequestedTemp != currentSetpoint) {
+        logger('info', 'checkForTemperatureUpdate', "requesting to change temp from $currentSetpoint to $currentRequestedTemp")        
         thermostatInstance.handleAppTemperatureChange(currentRequestedTemp)
         state.lastRequestedTemp = currentRequestedTemp
     }

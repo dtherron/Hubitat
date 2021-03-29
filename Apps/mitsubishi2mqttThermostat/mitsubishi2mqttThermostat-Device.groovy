@@ -115,12 +115,16 @@ def off() {
 }
 
 def setCoolingSetpoint(value) {
+    value = value.toDouble().round()
     logger("info", "COMMAND", "command setCoolingSetpoint called: ${value}")
+    state.lastTemperatureSetByApp = false
     publishMqtt("temp/set", "${value}")
 }
 
 def setHeatingSetpoint(value) {
+    value = value.toDouble().round()
     logger("info", "COMMAND", "command setHeatingSetpoint called: ${value}")
+    state.lastTemperatureSetByApp = false
     publishMqtt("temp/set", "${value}")
 }
 
@@ -163,6 +167,7 @@ def installed() {
     sendEvent(name: "temperatureUnit", value: location.temperatureScale, isStateChange: true)
     
     updateDataValue("lastRunningMode", "heat")    
+    state.lastTemperatureSetByApp = false
 
     updated()
 }
@@ -182,9 +187,14 @@ def updated() {
 // ========================================================
 // App-driven smart mode
 // ========================================================
+def wasLastTemperatureChangeByApp() {
+    return state.lastTemperatureSetByApp
+}
+
 def handleAppTemperatureChange(value) {
     if (device.currentValue("thermostatSetpoint") != value) {
         logger("info", "handleAppTemperatureChange", "set temperature setpoint to ${value}")
+        state.lastTemperatureSetByApp = true
         publishMqtt("temp/set", "${value}")
     }
 }
@@ -209,7 +219,7 @@ def handleAppThermostatFanMode(fanMode, requestOff) {
     }
     
     if (currentFanMode != fanMode) {
-        logger("info", "handleAppThermostatFanMode", "set fan to $fanMode")
+        logger("debug", "handleAppThermostatFanMode", "set fan to $fanMode")
         publishMqtt("fan/set", fanMode)
     }
 }
