@@ -241,6 +241,10 @@ def motionActiveHandler(evt) {
     }
     
     if (isActive) {
+        if (sensorHistory.removeAll { entry -> entry[1] == null } ) {
+            logger('warn', 'motionActiveHandler', "Sensor $deviceId had an active event without matching inactive, which was removed")
+        }
+
         sensorHistory << [timeNow, null]
     } else if (sensorHistory.size() > 0) {
         if (sensorHistory[-1][1] != null) {
@@ -264,9 +268,9 @@ def getRollingActivityLevel() {
         def sensorHistory = sensorHistoryKV.value
 
         sensorHistory.each { entry ->
-            def startTime = Math.min(timeNow, entry[0])
+            def startTime = Math.max(windowStartTime, entry[0])
             def endTime = entry[1] ? entry[1] : timeNow 
-            if (startTime >= windowStartTime) {
+            if (endTime >= windowStartTime) {
                 sensorTimeActive += (int) ((endTime - startTime) / 1000)
             }
         }
@@ -276,19 +280,26 @@ def getRollingActivityLevel() {
         timeActive += sensorTimeActive
     }
     
-    // max out at 30 minutes (in seconds)
-    timeActive = Math.min(1800, timeActive)
-    
-    def percentActive = (int) (100 * timeActive / 1800)
+    def percentActive = Math.min(100, (int) (100 * timeActive / 3600))
     
     logger('trace', 'getRollingActivityLevel', "Activity level is $timeActive or $percentActive")
     homeActivityLevel.setVariable(percentActive)
     
-    if (percentActive > 20) {
-        state.disableAwayModeUntil = now() + 1800000
+    if (percentActive > 10) {
+        updateAwayModeDisabledUntil(30)
+        logger('trace', 'getRollingActivityLevel', "Moderate activity in house; prevent away for 30 minutes")
+    } else if (percentActive > 30) {
+        updateAwayModeDisabledUntil(60)
+        logger('trace', 'getRollingActivityLevel', "High activity in house; prevent away for one hour")
     } else if (percentActive > 50) {
-        state.disableAwayModeUntil = now() + 3600000
+        updateAwayModeDisabledUntil(240)
+        logger('trace', 'getRollingActivityLevel', "Very high activity in house; prevent away for four hours")
     }
+}
+
+def updateAwayModeDisabledUntil(minutes) {
+    def newTimeRequested = now() + (60000 * minutes)
+    state.disableAwayModeUntil = Math.max(state.disableAwayModeUntil, newTimeRequested)
 }
 
 def allowAwayMode() {
@@ -296,24 +307,18 @@ def allowAwayMode() {
     def nightStart = Date.parse('HH:mm', settings.nighttimeStart)
     def nightEnd = Date.parse('HH:mm', settings.nighttimeEnd)
         
-    if (nightStart < nightEnd) {
-        // Case when night goes from 1am to 5am
-        if (timeOfDayIsBetween(nightStart, nightEnd, nowTime)) {
-            return false;
-        }
-    } else {
-        // case when not-night goes from 6am to 10pm
-        if (!timeOfDayIsBetween(nightEnd, nightStart, nowTime)) {
-            return false;
-        }
+    if ((nightStart < nightEnd && timeOfDayIsBetween(nightStart, nightEnd, nowTime)) || !timeOfDayIsBetween(nightEnd, nightStart, nowTime)) {  
+        logger('trace', 'allowAwayMode', "Nighttime; prevent away mode")
+        return false;
     }
 
-    // when the last real activity detected was too long ago
-    if (state.disableAwayModeUntil < now()) {
+    // when there was recent activity
+    if (state.disableAwayModeUntil > now()) {
+        logger('trace', 'allowAwayMode', "Recent activity detected; prevent away mode")
         return false
     }
     
-    logger('trace', 'allowAwayMode', "Not nighttime and no recent activity -- allow away mode")
+    logger('trace', 'allowAwayMode', "Not nighttime and no recent activity; allow away mode")
     return true
 }
 
