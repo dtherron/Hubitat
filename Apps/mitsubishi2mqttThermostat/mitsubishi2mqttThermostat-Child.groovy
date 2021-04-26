@@ -184,7 +184,7 @@ def initialize(thermostatInstance) {
         // TODO: figure out why the UI never updates to catch on to this
         if (remoteTempSensors?.removeAll { device -> device.getTypeName() == 'Mitsubishi2Mqtt Thermostat Device' }) {
             logger('warn', 'initialize', 'Some remote sensors were ignored because they are Mitsubishi2Mqtt child devices')
-    }
+        }
 
         // Subscribe to the new sensor(s)
         if (remoteTempSensors != null && remoteTempSensors.size() > 0) {
@@ -198,9 +198,7 @@ def initialize(thermostatInstance) {
             // Update the temperature with these new sensors
             updateRemoteTemperature(thermostatInstance)
         }
-}
-
-    subscribe(location, 'mode', locationModeChanged)
+    }
 
     // Set device settings if this is a new device
     thermostatInstance.updated()
@@ -261,7 +259,7 @@ def scheduledUpdateCheck() {
     def currentMonth = new Date(now()).format('MM').toInteger()
 
     if (currentMonth > 4 && currentMonth < 8) {
-        currentMode = 'off' // HACK
+        currentMode = 'off' // manual in summer
     }
 
     if (currentMode == 'off') {
@@ -272,12 +270,6 @@ def scheduledUpdateCheck() {
     } else {
         runIn(1, 'checkForFanUpdate', [data: currentMode])
     }
-}
-
-def locationModeChanged(evt) {
-    def newMode = evt.value
-    logger('trace', 'locationModeChanged', "Got mode change event to $newMode")
-    scheduledUpdateCheck()
 }
 
 def handleModeOff() {

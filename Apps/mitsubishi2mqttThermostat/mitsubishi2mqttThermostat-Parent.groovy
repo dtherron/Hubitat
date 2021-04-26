@@ -160,6 +160,8 @@ def initialize() {
         updateOutsideConditions()
     }
 
+    subscribe(location, 'mode', locationModeChanged)
+
     childApps.each { child ->
         logger('debug', 'initialize', "Updating child app: ${child.label}")
         child.updated()
@@ -216,6 +218,12 @@ def updateOutsideConditions() {
         logger('debug', 'updateOutsideConditions', "Updating child app: ${child.label}")
         child.updateWeatherData(outsideTemp, cloudiness, forecastLow, forecastHigh)
     }
+}
+
+def locationModeChanged(evt) {
+    def newMode = evt.value
+    updateAwayModeDisabledUntil(10)
+    logger('trace', 'locationModeChanged', "Mode changed to away; prevent away for 15 minutes to avoid bouncing")
 }
 
 def motionActiveHandler(evt) {
