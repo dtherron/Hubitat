@@ -249,7 +249,7 @@ def getThermostat() {
 //     None
 //
 //************************************************************
-def scheduledUpdateCheck() {
+def scheduledUpdateCheck(readModeOffSetByUser = true) {
     // weather data must be no more than six hours old
     if (state.lastWeatherDataTime != null && now() - 21600000 > state.lastWeatherDataTime) {
         updateWeatherData()
@@ -257,13 +257,15 @@ def scheduledUpdateCheck() {
 
     def currentMode = 'heat'
     def currentMonth = new Date(now()).format('MM').toInteger()
-    def wasModeSetOffByUser = getThermostat().wasModeSetOffByUser() == true
+    def wasModeSetOffByUser = readModeOffSetByUser && getThermostat().wasModeSetOffByUser() == true
 
     // Manual in summer. If the user sets it to off, that will stick.
     if (currentMonth >= 5 && currentMonth <= 9) {
         currentMode = wasModeSetOffByUser ? 'off' : getThermostat().getLastRunningMode()
     }
         
+    logger('debug', 'scheduledUpdateCheck', "wasModeSetOffByUser is $wasModeSetOffByUser; currentMode is $currentMode because $wasModeSetOffByUser [${getThermostat().wasModeSetOffByUser()}] and ${getThermostat().getLastRunningMode()}")
+
     if (currentMode == 'heat') {        
         runIn(1, 'handleHeatingTempUpdate')
         runIn(60, 'checkForFanUpdate', [data: currentMode])

@@ -104,17 +104,19 @@ def cool() {
     logger("info", "COMMAND", "command cool called")
     state.modeOffSetByUser = false
     setThermostatDeviceMode("cool") 
+    publishMqtt("temp/set", device.currentValue("coolingSetpoint"))
 }
 
 def heat() {
     logger("info", "COMMAND", "command heat called")
     state.modeOffSetByUser = false
-    setThermostatDeviceMode("heat") 
     if (parent) {
         // let the parent app take over settings again
         state.lastTemperatureSetByApp = true
-        parent.scheduledUpdateCheck()
+        parent.scheduledUpdateCheck(false)
     }
+    setThermostatDeviceMode("heat") 
+    publishMqtt("temp/set", device.currentValue("heatingSetpoint"))
 }
 
 def off() {
@@ -129,14 +131,27 @@ def setCoolingSetpoint(value) {
     value = value.toDouble().round()
     logger("info", "COMMAND", "command setCoolingSetpoint called: ${value}")
     state.lastTemperatureSetByApp = false
-    publishMqtt("temp/set", "${value}")
+    
+    if (device.currentValue("thermostatMode") == "cool") {
+        publishMqtt("temp/set", "${value}")
+    } else {
+        sendEvent(name: "coolingSetpoint", value: value) 
+    }
 }
 
 def setHeatingSetpoint(value) {
     value = value.toDouble().round()
     logger("info", "COMMAND", "command setHeatingSetpoint called: ${value}")
     state.lastTemperatureSetByApp = false
-    publishMqtt("temp/set", "${value}")
+
+    if (device.currentValue("thermostatMode") == "heat") {
+        publishMqtt("temp/set", "${value}")
+        if (parent) {
+            parent.scheduledUpdateCheck(false)
+        }
+    } else {
+        sendEvent(name: "heatingSetpoint", value: value) 
+    }
 }
 
 // Hack so that the UI command works if you specify the real arg in the second param
