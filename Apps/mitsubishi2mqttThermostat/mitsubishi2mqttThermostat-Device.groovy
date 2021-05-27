@@ -96,22 +96,33 @@ metadata {
 
 def auto() { 
     logger("info", "COMMAND", "command auto called")
-    setThermostatMode("auto") 
+    state.modeOffSetByUser = false
+    setThermostatDeviceMode("auto") 
 }
 
 def cool() {
     logger("info", "COMMAND", "command cool called")
-    setThermostatMode("cool") 
+    state.modeOffSetByUser = false
+    setThermostatDeviceMode("cool") 
 }
 
 def heat() {
     logger("info", "COMMAND", "command heat called")
-    setThermostatMode("heat") 
+    state.modeOffSetByUser = false
+    setThermostatDeviceMode("heat") 
+    if (parent) {
+        // let the parent app take over settings again
+        state.lastTemperatureSetByApp = true
+        parent.scheduledUpdateCheck()
+    }
 }
 
 def off() {
     logger("info", "COMMAND", "command off called")
-    setThermostatMode("off") 
+    
+    // when turned off manually, track the difference between an app-set off and a human-set off
+    state.modeOffSetByUser = true
+    setThermostatDeviceMode("off") 
 }
 
 def setCoolingSetpoint(value) {
@@ -130,6 +141,28 @@ def setHeatingSetpoint(value) {
 
 // Hack so that the UI command works if you specify the real arg in the second param
 def setThermostatFanMode(ignore, value) { setThermostatFanMode(value) }
+
+def setThermostatMode(value) {
+    logger("info", "COMMAND", "command setThermostatMode called: ${value}")
+    switch(value.toLowerCase()) {
+        case "heat":
+        heat()
+        break;
+        
+        case "cool":
+        cool()
+        break;
+        
+        case "auto":
+        auto()
+        break;
+        
+        case "off":
+        off()
+        break;
+        
+    }
+}
 
 def setThermostatFanMode(value) {
     logger("info", "COMMAND", "command setThermostatFanMode called: ${value}")
@@ -168,6 +201,7 @@ def installed() {
     
     updateDataValue("lastRunningMode", "heat")    
     state.lastTemperatureSetByApp = false
+    state.modeOffSetByUser = false
 
     updated()
 }
@@ -188,7 +222,15 @@ def updated() {
 // App-driven smart mode
 // ========================================================
 def wasLastTemperatureChangeByApp() {
-    return state.lastTemperatureSetByApp
+    return state.lastTemperatureSetByApp == true
+}
+
+def wasModeSetOffByUser() {
+    return state.modeOffSetByUser == true
+}
+
+def getLastRunningMode() {
+    return getDataValue("lastRunningMode")
 }
 
 def handleAppTemperatureChange(value) {
@@ -207,14 +249,15 @@ def handleAppThermostatFanMode(fanMode, requestOff) {
     if (requestOff) {
         if (currentMode != "off") {
             logger("info", "handleAppThermostatFanMode", "turning heat off")
-            setThermostatMode("off")
+            setThermostatDeviceMode("off")
         }
     }
     else {
+        state.modeOffSetByUser = false
         if (currentMode == "off") {
             def lastRunningMode = getDataValue("lastRunningMode")
             logger("info", "handleAppThermostatFanMode", "turning unit back on to $lastRunningMode")
-            setThermostatMode(lastRunningMode)
+            setThermostatDeviceMode(lastRunningMode)
         }
     }
     
@@ -502,11 +545,11 @@ def setLogLevel(level) {
     logger("warn", "setLogLevel", "Device logging level set to $state.loggingLevel")
 }
 
-def setThermostatMode(String value) {
+def setThermostatDeviceMode(String value) {
     if (value == null) {
-        logger("error", "setThermostatMode", "setThermostatMode called with null")
+        logger("error", "setThermostatDeviceMode", "setThermostatDeviceMode called with null")
     } else if (value != device.currentValue("thermostatMode")) {
-        logger("debug", "setThermostatMode", "setThermostatMode to ${value}")
+        logger("debug", "setThermostatDeviceMode", "setThermostatDeviceMode to ${value}")
         publishMqtt("mode/set", value)
     }
 }

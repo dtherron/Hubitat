@@ -257,25 +257,19 @@ def scheduledUpdateCheck() {
 
     def currentMode = 'heat'
     def currentMonth = new Date(now()).format('MM').toInteger()
+    def wasModeSetOffByUser = getThermostat().wasModeSetOffByUser() == true
 
-    if (currentMonth > 4 && currentMonth < 8) {
-        currentMode = 'off' // manual in summer
+    // Manual in summer. If the user sets it to off, that will stick.
+    if (currentMonth >= 5 && currentMonth <= 9) {
+        currentMode = wasModeSetOffByUser ? 'off' : getThermostat().getLastRunningMode()
     }
-
-    if (currentMode == 'off') {
-        runIn(1, 'handleModeOff')
-    } else if (currentMode == 'heat') {        
+        
+    if (currentMode == 'heat') {        
         runIn(1, 'handleHeatingTempUpdate')
         runIn(60, 'checkForFanUpdate', [data: currentMode])
-    } else {
+    } else if (currentMode == 'cool') {
         runIn(1, 'checkForFanUpdate', [data: currentMode])
     }
-}
-
-def handleModeOff() {
-    def thermostatInstance = getThermostat()
-    logger('debug', 'handleModeOff', 'Current mode is off. Turning off heat pump.')
-    thermostatInstance.handleAppThermostatFanMode('quiet', true)
 }
 
 def handleHeatingTempUpdate() {
@@ -313,7 +307,7 @@ def handleHeatingTempUpdate() {
         }
 
             
-        // If the forecast high for the day is hotter than we want the house, back of on heating
+        // If the forecast high for the day is hotter than we want the house, back off on heating
         if (state.lastWeatherExpectedHigh != null) {
             maxTempInSchedule = thermostatSchedule.collect { it[2] }.max().toInteger()
             if (state.lastWeatherExpectedHigh > maxTempInSchedule) {
@@ -325,7 +319,7 @@ def handleHeatingTempUpdate() {
                 if (state.lastWeatherExpectedHigh < 40 && state.lastWeatherExpectedLow < 32) {
                     logger('info', 'handleHeatingTempUpdate', 'bumping temp two degrees because the high is below 40 and low below 32')
                     currentRequestedTemp += 2
-            } else if (state.lastWeatherExpectedHigh < 45 && state.lastWeatherExpectedLow < 34) {
+                } else if (state.lastWeatherExpectedHigh < 45 && state.lastWeatherExpectedLow < 34) {
                     logger('info', 'handleHeatingTempUpdate', 'bumping temp one degree because the high is below 45 and low below 34')
                     currentRequestedTemp++
                 }
@@ -335,7 +329,7 @@ def handleHeatingTempUpdate() {
         // If it's going to be very sunny, reduce the heat
         def sns = getSunriseAndSunset(sunriseOffset: '0:30', sunsetOffset: '-0:30')
         if (heatingSunBoost > 0 &&                                               // if this device has a sunboost
-            timeOfDayIsBetween(sns.sunrise, sns.sunset, new Date()) &&            // and it is peak day time
+            timeOfDayIsBetween(sns.sunrise, sns.sunset, new Date()) &&           // and it is peak day time
             state.lastWeatherCloudiness != null &&                               // and we have cloud data
             state.lastWeatherCloudiness <= 80)                                   // and it says it is fairly sunny
         {
