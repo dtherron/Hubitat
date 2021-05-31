@@ -11,33 +11,10 @@ definition(
 preferences {
     page(name: 'Install', title: 'Smart Ceiling Fan', install: true, uninstall: true) {
         section('<b>Config</b>') {
-            input(
-                name: 'timeToTurnOn',
-                type: 'string',
-                title: 'Time of day to turn the fan to auto',
-                description: 'e.g. 21:30',
-                required: true,
-                defaultValue: "21:30",
-                displayDuringSetup: true
-            )
-            input(
-                name: 'timeToTurnOff',
-                type: 'string',
-                title: 'Time of day to turn the fan off',
-                description: 'e.g. 6:30',
-                required: true,
-                defaultValue: "6:30",
-                displayDuringSetup: true
-            )
-            input(
-                name: 'minutesOnManual',
-                type: 'number',
-                title: 'How long (in minutes) to leave the fan alone if external changes are detected',
-                description: 'e.g. 90',
-                required: true,
-                defaultValue: 90,
-                displayDuringSetup: true
-            )
+            input(name: 'dayLowFanTemp', type: 'number',  title: 'Temp to turn fan on at during the day', required: true, defaultValue: 68)
+            input(name: 'dayHighFanTemp', type: 'number',  title: 'Temp to set fan to high at during the day', required: true, defaultValue: 78)
+            input(name: 'nightLowFanTemp', type: 'number',  title: 'Temp to turn fan on at during the night', required: true, defaultValue: 60)
+            input(name: 'nightHighFanTemp', type: 'number',  title: 'Temp to set fan to high at during the night', required: true, defaultValue: 75)
         }
         
         section('<b>Fan to control</b>') {
@@ -109,8 +86,15 @@ def initialize() {
     logger('info', 'initialize', "Initializing ${remoteTempSensors.size()} remote sensor(s)")
         
     subscribe(remoteTempSensors, 'temperature', remoteTemperatureHandler)
+    subscribe(location, "mode", locationModeChanged)
 
     updateRemoteTemperature()
+}
+
+def locationModeChanged(evt) {
+    def newMode = evt.value
+    logger('trace', 'locationModeChanged', "Got mode change event to $newMode")
+    updateRemoteTemperature(true)
 }
 
 def remoteTemperatureHandler(evt) {
@@ -118,15 +102,16 @@ def remoteTemperatureHandler(evt) {
     updateRemoteTemperature()
 }
 
-def updateRemoteTemperature() {
+def updateRemoteTemperature(forceChange = false) {
+    def currentHour = new Date(now()).format('H').toInteger()
+    def isNight = location.currentMode.getName() == "Night" || currentHour >= 22 || currentHour <= 5
+    def lowTemp = isNight ? settings.nightLowFanTemp : settings.dayLowFanTemp
+    def highTemp = isNight ? settings.nightHighFanTemp : settings.dayHighFanTemp
+
     def total = 0
     def count = 0
-
-    def roomTemp = null
-    def fanSpeed = 0
-    
     // Average across all sensors, but ignore any not reporting as present
-    logger('trace', 'updateRemoteTemperature', "Checking ${remoteTempSensors.size()} for presence to update remote temp")
+    logger('trace', 'updateRemoteTemperature', "Checking ${remoteTempSensors.size()} for presence to update remote temp; hour is $currentHour and isNight is $isNight")
     for (sensor in remoteTempSensors) {
         if (sensor.currentValue('presence') == 'present') {
             total += sensor.currentValue('temperature')
@@ -140,20 +125,28 @@ def updateRemoteTemperature() {
         return
     }
 
+    def roomTemp = null
+    def fanSpeed = 0
+    
     roomTemp = Math.round(total / count)
     logger('trace', 'updateRemoteTemperature', "Room temp is $roomTemp")
-    if (roomTemp < 64) {
+    if (roomTemp < lowTemp) {
         fanSpeed = 0
     } else {
-        fanSpeed = (int) ((roomTemp - 64) / 2)
+        def fanRange = highTemp - lowTemp
+        fanSpeed = Math.round(6 * (roomTemp - lowTemp) / fanRange)
         fanSpeed = Math.max(1, fanSpeed)
         fanSpeed = Math.min(6, fanSpeed)
     }
     
-        state.remove("lastfanSpeed")  
+    setFanSpeed(fanSpeed, forceChange)
+}
+
+def setFanSpeed(fanSpeed, forceChange = false) {
+    logger('trace', 'setFanSpeed', "Requested with $fanSpeed")
     def fanSpeedName = speedToSpeedName(fanSpeed)
-    if (ceilingFan.currentValue("speed") != fanSpeedName) {
-        logger('info', 'updateRemoteTemperature', "Setting fan to $fanSpeedName")
+    if (forceChange || ceilingFan.currentValue("speed") != fanSpeedName) {
+        logger('info', 'setFanSpeed', "Setting fan to $fanSpeedName")
         ceilingFan.setSpeed(fanSpeedName)
     }
 }
@@ -230,10 +223,7 @@ def logger(level, source, msg) {
 //
 //************************************************************
 def logsDropLevel() {
-    def thermostat = getThermostat()
-
     app.updateSetting('logLevel', [type:'enum', value:'3'])
-    thermostat.setLogLevel(3)
 
     loggingLevel = app.getSetting('logLevel').toInteger()
     logger('info', 'logsDropLevel', "App logging level set to $loggingLevel")
