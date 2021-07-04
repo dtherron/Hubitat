@@ -249,27 +249,29 @@ def getThermostat() {
 //     None
 //
 //************************************************************
-def scheduledUpdateCheck(readModeOffSetByUser = true) {
+def scheduledUpdateCheck() {
     // weather data must be no more than six hours old
     if (state.lastWeatherDataTime != null && now() - 21600000 > state.lastWeatherDataTime) {
         updateWeatherData()
     }
 
+    def thermostatInstance = getThermostat()
     def currentMode = 'heat'
     def currentMonth = new Date(now()).format('MM').toInteger()
-    def wasModeSetOffByUser = readModeOffSetByUser && getThermostat().wasModeSetOffByUser() == true
+    def wasModeOffSetByApp = thermostatInstance.wasModeOffSetByApp() == true
+    def currentThermostateMode = thermostatInstance.currentValue('thermostatMode')
 
     // Manual in summer. If the user sets it to off, that will stick.
     if (currentMonth >= 5 && currentMonth <= 9) {
-        currentMode = wasModeSetOffByUser ? 'off' : getThermostat().getLastRunningMode()
+        currentMode = (currentThermostateMode == 'off' && !wasModeOffSetByApp) ? 'off' : getThermostat().getLastRunningMode()
     }
         
-    logger('debug', 'scheduledUpdateCheck', "wasModeSetOffByUser is $wasModeSetOffByUser; currentMode is $currentMode because $wasModeSetOffByUser [${getThermostat().wasModeSetOffByUser()}] and ${getThermostat().getLastRunningMode()}")
+    logger('debug', 'scheduledUpdateCheck', "currentMode is $currentMode because currentThermostateMode is $currentThermostateMode and wasModeOffSetByApp is $wasModeOffSetByApp")
 
     if (currentMode == 'heat') {        
         runIn(1, 'handleHeatingTempUpdate')
         runIn(60, 'checkForFanUpdate', [data: currentMode])
-    } else if (currentMode == 'cool') {
+    } else if (currentMode == 'cool') {        
         runIn(1, 'checkForFanUpdate', [data: currentMode])
     }
 }
@@ -370,6 +372,7 @@ def checkForFanUpdate(currentMode) {
 
     def currentSetpoint = thermostatInstance.currentValue('thermostatSetpoint')
     def currentIndoorTemp = thermostatInstance.currentValue('temperature')
+    def currentThermostatFanMode = thermostatInstance.currentValue('thermostatFanMode')
 
     def fanSpeed = fanBoost.toInteger() + ((currentMode == 'cool') ? (currentIndoorTemp - currentSetpoint) : (currentSetpoint - currentIndoorTemp))
     logger('trace', 'checkForFanUpdate', "currentIndoorTemp is $currentIndoorTemp; currentSetpoint is $currentSetpoint; fanBoost is $fanBoost; initial fanSpeed is $fanSpeed")
