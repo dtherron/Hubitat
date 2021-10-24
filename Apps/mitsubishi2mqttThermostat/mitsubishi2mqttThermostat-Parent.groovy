@@ -117,14 +117,8 @@ def initialize() {
     logger('info', 'initialize', "App logging level set to $loggingLevel")
     logger('info', 'initialize', "Initialize LogDropLevelTime: $settings.logDropLevelTime")
 
-    // Subscribe to the motion sensor(s)
-    if (motionSensors != null && motionSensors.size() > 0) {
-        logger('info', 'initialize', "Initializing ${motionSensors.size()} motion sensor(s)")
-        subscribe(motionSensors, 'motion.active', motionActiveHandler)
-        subscribe(motionSensors, 'motion.inactive', motionActiveHandler)
-        runEvery5Minutes(getRollingActivityLevel)
-    }
-
+    subscribeToMotionSensors()
+    
     // Subscribe to the outside temperature sensor(s)
     if (outsideTempSensors == null && openWeatherMap == null) {
         state.lastOutsideTempSensorsValue = ''
@@ -168,6 +162,22 @@ def initialize() {
     }
 }
 
+def subscribeToMotionSensors() {
+    // Subscribe to the motion sensor(s) if away
+    if (location.currentMode.getName() == 'Away') {
+        if (motionSensors != null && motionSensors.size() > 0) {
+            logger('trace', 'subscribeToMotionSensors', "Initializing ${motionSensors.size()} motion sensor(s) and scheduling presence detection")
+            subscribe(motionSensors, 'motion.active', motionActiveHandler)
+            subscribe(motionSensors, 'motion.inactive', motionActiveHandler)
+            runEvery5Minutes(getRollingActivityLevel)
+        }
+    } else {
+        logger('trace', 'subscribeToMotionSensors', "Clearing subscriptions and schedules for presence detection")
+        unsubscribe(motionActiveHandler)
+        unschedule(getRollingActivityLevel)
+    }
+}
+
 def outsideConditionsHandler(evt) {
     logger('trace', 'outsideConditionsHandler', "Got event: ${evt.name}, ${evt.value}")
     updateOutsideConditions()
@@ -202,6 +212,10 @@ def updateOutsideConditions() {
             total += openWeatherMap.currentValue('temperature') // TODO: figure out what to do for unit C vs F
             count++
             cloudiness = openWeatherMap.currentValue('cloud')
+            cloudiness_forecast = openWeatherMap.currentValue('cloudToday')
+            if (cloudiness_forecast > 65 && cloudiness_forecast > cloudiness) {
+                cloudiness = cloudiness_forecast
+            }
             forecastLow = openWeatherMap.currentValue('forecastLow')
             forecastHigh = openWeatherMap.currentValue('forecastHigh')
         }
@@ -215,18 +229,34 @@ def updateOutsideConditions() {
     }
 
     childApps.each { child ->
-        logger('debug', 'updateOutsideConditions', "Updating child app: ${child.label}")
+        logger('debug', 'updateOutsideConditions', "Updating child app's weather data: ${child.label} with temp:$outsideTemp, cloud:$cloudiness, low:$forecastLow, high:$forecastHigh")
         child.updateWeatherData(outsideTemp, cloudiness, forecastLow, forecastHigh)
     }
 }
 
 def locationModeChanged(evt) {
-    def newMode = evt.value
-    updateAwayModeDisabledUntil(10)
-    logger('trace', 'locationModeChanged', "Mode changed to away; prevent away for 15 minutes to avoid bouncing")
+    subscribeToMotionSensors()
+
+    if (location.currentMode.getName() == 'Away') {
+        def delayMinutes = 10
+        updateAwayModeDisabledUntil(delayMinutes)
+        logger('trace', 'locationModeChanged', "Mode changed to away; prevent away for $delayMinutes minutes to avoid bouncing")
+    } else {
+        logger('trace', 'locationModeChanged', "Mode no longer set to away")
+        state.motionSensorState = [:]
+        childApps.each { child ->
+            logger('debug', 'locationModeChanged', "Calling scheduledUpdateCheck for child app: ${child.label}")
+            child.scheduledUpdateCheck()
+        }
+    }
 }
 
 def motionActiveHandler(evt) {
+    if (location.currentMode.getName() != 'Away') {
+        logger('trace', 'motionActiveHandler', "House is not set to Away, so ignoring")
+        return
+    }
+    
     def deviceId = evt.getDeviceId().toString()
     def isActive = evt.value == 'active'
     if (evt.value != 'active' && evt.value != 'inactive') {

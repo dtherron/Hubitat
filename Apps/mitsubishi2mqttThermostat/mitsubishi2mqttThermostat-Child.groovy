@@ -282,7 +282,7 @@ def handleHeatingTempUpdate() {
     def currentRequestedTemp
 
     if (location.currentMode.getName() == 'Away' && parent?.allowAwayMode()) {
-        logger(currentRequestedTemp == awayModeHeatTemp ? 'debug' : 'info', 'handleHeatingTempUpdate', "house is set to Away. Setting temperature to $awayModeHeatTemp")
+        logger('debug', 'handleHeatingTempUpdate', "house is set to Away. Setting temperature to $awayModeHeatTemp")
         currentRequestedTemp = awayModeHeatTemp
     } else {
         // There is some weird bug or issue that is causing wasLastTemperatureChangeByApp to not return false
@@ -309,7 +309,6 @@ def handleHeatingTempUpdate() {
         } else {
             logger('trace', 'handleHeatingTempUpdate', "current active schedule entry: ${currentScheduleEntry[1]} -> $currentRequestedTemp")
         }
-
             
         // If the forecast high for the day is hotter than we want the house, back off on heating
         if (state.lastWeatherExpectedHigh != null) {
@@ -338,7 +337,7 @@ def handleHeatingTempUpdate() {
             state.lastWeatherCloudiness <= 80)                                   // and it says it is fairly sunny
         {
             def sunReduction = (((100 - state.lastWeatherCloudiness) / 80) * heatingSunBoost).toDouble().round()
-            logger('debug', 'handleHeatingTempUpdate', "sunny day -- reduce heat setting by $sunReduction")
+            logger('debug', 'handleHeatingTempUpdate', "sunny day -- reduce heat setting by $sunReduction (${state.lastWeatherCloudiness})")
             currentRequestedTemp -= sunReduction
         }
     }
@@ -393,9 +392,10 @@ def checkForFanUpdate(currentMode) {
 
     def normalizeFanSpeed = "$fanSpeed"
     def requestOff = false
+    def wasModeOffSetByApp = thermostatInstance.wasModeOffSetByApp() == true
 
     // turn fan off at -2 but only back on at 0 to avoid swinging too much
-    if (fanSpeed < -1 || (currentMode == 'off' && fanSpeed == -1)) {
+    if (fanSpeed < -1 || (wasModeOffSetByApp && fanSpeed == -1)) {
         requestOff = true
         normalizeFanSpeed = 'quiet'
     }
@@ -405,7 +405,7 @@ def checkForFanUpdate(currentMode) {
         normalizeFanSpeed = 4
     }
 
-    logger('debug', 'checkForFanUpdate', "Prefered fan speed is $fanSpeed, normalized to $normalizeFanSpeed and request off is $requestOff")
+    logger('debug', 'checkForFanUpdate', "Prefered fan speed is $fanSpeed, normalized to $normalizeFanSpeed, currentMode is $currentMode, wasModeOffSetByApp is $wasModeOffSetByApp, and request off is $requestOff")
 
     thermostatInstance.handleAppThermostatFanMode(normalizeFanSpeed, requestOff)
 }

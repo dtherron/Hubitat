@@ -149,7 +149,7 @@ def setCoolingSetpoint(value) {
     logger("info", "COMMAND", "command setCoolingSetpoint called: ${value}")
     state.lastTemperatureSetByApp = false
     
-    if (device.currentValue("thermostatMode") == "cool") {
+    if (getShadowMode() == "cool") {
         publishMqtt("temp/set", "${value}")
         if (parent) {
             parent.scheduledUpdateCheck()
@@ -164,7 +164,7 @@ def setHeatingSetpoint(value) {
     logger("info", "COMMAND", "command setHeatingSetpoint called: ${value}")
     state.lastTemperatureSetByApp = false
 
-    if (device.currentValue("thermostatMode") == "heat") {
+    if (getShadowMode() == "heat") {
         publishMqtt("temp/set", "${value}")
         if (parent) {
             parent.scheduledUpdateCheck()
@@ -172,6 +172,10 @@ def setHeatingSetpoint(value) {
     } else {
         sendEvent(name: "heatingSetpoint", value: value) 
     }
+}
+
+def getShadowMode() {
+    return state.modeOffSetByApp ? getDataValue("lastRunningMode") : device.currentValue("thermostatMode")
 }
 
 // Hack so that the UI command works if you specify the real arg in the second param
