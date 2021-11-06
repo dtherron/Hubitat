@@ -259,7 +259,7 @@ def scheduledUpdateCheck() {
     def currentMode = 'heat'
     def currentMonth = new Date(now()).format('MM').toInteger()
     def wasModeOffSetByApp = thermostatInstance.wasModeOffSetByApp() == true
-    def currentThermostateMode = thermostatInstance.currentValue('thermostatMode')
+    def currentThermostateMode = thermostatInstance.currentValue('trueThermostatMode')
 
     // Manual in summer. If the user sets it to off, that will stick.
     if (currentMonth >= 5 && currentMonth <= 9) {

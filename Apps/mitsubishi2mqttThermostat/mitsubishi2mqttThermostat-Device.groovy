@@ -37,6 +37,7 @@ metadata {
         command "setHeatPumpVane", ["string"]
         command "dry"
         
+        attribute "trueThermostatMode", "ENUM", ["heat", "cool", "fan_only", "dry", "auto", "off"]
         attribute "temperatureUnit", "ENUM", ["C", "F"]
         attribute "heatPumpVane", "ENUM", ["auto", "swing", "1", "2", "3", "4", "5"]
         attribute "heatPumpWideVane", "ENUM", ["swing", "<<", "<", "|", ">", ">>", "<>"]
@@ -149,7 +150,7 @@ def setCoolingSetpoint(value) {
     logger("info", "COMMAND", "command setCoolingSetpoint called: ${value}")
     state.lastTemperatureSetByApp = false
     
-    if (getShadowMode() == "cool") {
+    if (device.currentValue("thermostatMode") == "cool") {
         publishMqtt("temp/set", "${value}")
         if (parent) {
             parent.scheduledUpdateCheck()
@@ -164,7 +165,7 @@ def setHeatingSetpoint(value) {
     logger("info", "COMMAND", "command setHeatingSetpoint called: ${value}")
     state.lastTemperatureSetByApp = false
 
-    if (getShadowMode() == "heat") {
+    if (device.currentValue("thermostatMode") == "heat") {
         publishMqtt("temp/set", "${value}")
         if (parent) {
             parent.scheduledUpdateCheck()
@@ -172,10 +173,6 @@ def setHeatingSetpoint(value) {
     } else {
         sendEvent(name: "heatingSetpoint", value: value) 
     }
-}
-
-def getShadowMode() {
-    return state.modeOffSetByApp ? getDataValue("lastRunningMode") : device.currentValue("thermostatMode")
 }
 
 // Hack so that the UI command works if you specify the real arg in the second param
@@ -236,6 +233,7 @@ def installed() {
     sendEvent(name: "supportedThermostatFanModes", value: ["auto", "quiet", "1", "2", "3", "4"], isStateChange: true)
     sendEvent(name: "supportedThermostatModes", value: ["off", "auto", "heat", "cool", "fanOnly", "dry"] , isStateChange: true)
     sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
+    sendEvent(name: "trueThermostatMode", value: "off", isStateChange: true)
     sendEvent(name: "thermostatFanMode", value: "auto", isStateChange: true)
     sendEvent(name: "thermostatOperatingState", value: "idle", isStateChange: true)
     sendEvent(name: "thermostatSetpoint", value: 68, isStateChange: true)
@@ -289,7 +287,7 @@ def handleAppTemperatureChange(value) {
 }
 
 def handleAppThermostatFanMode(fanMode, requestOff) {
-    def currentMode = device.currentValue("thermostatMode")
+    def currentMode = device.currentValue("trueThermostatMode")
     def currentFanMode = device.currentValue("thermostatFanMode")
     logger("trace", "handleAppThermostatFanMode", "set fan $fanMode with off $requestOff. Currently unit is in $currentMode and fan is at $currentFanMode")
     
@@ -425,7 +423,7 @@ def parse(String event) {
 }
 
 def setIfNotNullAndChanged(newValue, attributeName, sourceMethod, boolean forceLowerCase = true) {
-    if (attributeName == "thermostatMode" && newValue == "fan_only") {
+    if (attributeName == "trueThermostatMode" && newValue == "fan_only") {
         forceLowerCase = false
         newValue = "fanOnly"
     }
@@ -443,10 +441,13 @@ def setIfNotNullAndChanged(newValue, attributeName, sourceMethod, boolean forceL
 }
 
 def parseSettings(parsedSettings) {
-    def currentMode = device.currentValue("thermostatMode")
-    if (setIfNotNullAndChanged(parsedSettings?.mode, "thermostatMode", "parseSettings")) {
+    def currentMode = device.currentValue("trueThermostatMode")
+    if (setIfNotNullAndChanged(parsedSettings?.mode, "trueThermostatMode", "parseSettings")) {
         logger("info", "parseSettings", "Mode changed to ${parsedSettings.mode}")
         currentMode = parsedSettings.mode.toLowerCase()
+        if (!state.modeOffSetByApp) {
+            sendEvent(name: "thermostatMode", value: currentMode) 
+        }
         if (currentMode != "off") {
             updateDataValue("lastRunningMode", parsedSettings.mode.toLowerCase())    
             logger("trace", "parseState", "lastRunningMode changed to $currentMode")
@@ -474,10 +475,13 @@ def parseSettings(parsedSettings) {
 }
 
 def parseState(parsedState) {
-    def currentMode = device.currentValue("thermostatMode")
-    if (setIfNotNullAndChanged(parsedState?.mode, "thermostatMode", "parseState")) {
+    def currentMode = device.currentValue("trueThermostatMode")
+    if (setIfNotNullAndChanged(parsedState?.mode, "trueThermostatMode", "parseState")) {
         logger("info", "parsedState", "Mode changed to ${parsedState.mode}")
         currentMode = parsedState.mode.toLowerCase()
+        if (!state.modeOffSetByApp) {
+            sendEvent(name: "thermostatMode", value: currentMode) 
+        }
         if (currentMode != "off") {
             updateDataValue("lastRunningMode", parsedState.mode.toLowerCase())    
             logger("trace", "parseState", "lastRunningMode changed to $currentMode")
@@ -603,7 +607,7 @@ def setLogLevel(level) {
 def setThermostatDeviceMode(String value) {
     if (value == null) {
         logger("error", "setThermostatDeviceMode", "setThermostatDeviceMode called with null")
-    } else if (value != device.currentValue("thermostatMode")) {
+    } else if (value != device.currentValue("trueThermostatMode")) {
         logger("debug", "setThermostatDeviceMode", "setThermostatDeviceMode to ${value}")
         publishMqtt("mode/set", value)
     }
