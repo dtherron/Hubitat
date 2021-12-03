@@ -61,6 +61,10 @@ def pageConfig() {
             input 'remoteTempSensors', 'capability.temperatureMeasurement', title: 'Remote temperature sensors', multiple: true, required: false
         }
 
+        section('<b>Remote illuminance sensor(s) (largest value will be used)</b>') {
+            input 'remoteIlluminanceSensors', 'capability.illuminanceMeasurement', title: 'Remote illuminance sensors', multiple: true, required: false
+        }
+
         section('<b>Log Settings</b>') {
             input (name: 'logLevel', type: 'enum', title: 'Logging level: Messages with this level and higher will be logged', options: [[0: 'Disabled'], [1: 'Error'], [2: 'Warning'], [3: 'Info'], [4: 'Debug'], [5: 'Trace']], defaultValue: 3)
             input 'logDropLevelTime', 'number', title: 'Drop down to Info level after (minutes)', required: true, defaultValue: 5
@@ -81,8 +85,6 @@ def installed() {
 
     // Generate a random DeviceID
     state.deviceID = 'm2mt' + Math.abs(new Random().nextInt() % 9999) + '_' + (now() % 9999)
-
-    state.lastRemoteTempSensorsValue = ''
 
     //Create Mitsubishi2Mqtt Thermostat device
     def thermostat
@@ -108,6 +110,7 @@ def updated() {
     }
 
     logger('debug', 'updated', "Updated Running Mitsubishi2Mqtt Thermostat: $app.label.")
+    unsubscribe()
 
     state.lastThermostatScheduleIndex = null
     if (schedule != null && !schedule.trim().isEmpty()) {
@@ -166,29 +169,33 @@ def initialize(thermostatInstance) {
     logger('info', 'initialize', "Initialize LogDropLevelTime: $settings.logDropLevelTime")
 
     state.lastWeatherDataTime = null
+    state.lastHighIlluminanceTime = null
 
-    if (remoteTempSensors == null) {
-        if (state.lastRemoteTempSensorsValue != '') {
-            state.lastRemoteTempSensorsValue = ''
-            logger('debug', 'initialize', 'clearing remote sensors')
-            unsubscribe(remoteTemperatureHandler)
-            thermostatInstance.clearRemoteTemperature() // Clear any lingering value
-        }
-    } else if (remoteTempSensors.toString() != state.lastRemoteTempSensorsValue) {
-        state.lastRemoteTempSensorsValue = remoteTempSensors.toString()
-        logger('trace', 'initialize', 'remote sensor change found')
-        unsubscribe(remoteTemperatureHandler)
+    initializeRemoteTemperatureSensors(thermostatInstance);
+    initializeRemoteIlluminanceSensors();
+
+    subscribe(location, 'mode', locationModeChanged)
+
+    // Set device settings if this is a new device
+    thermostatInstance.updated()
+}
+
+def initializeRemoteTemperatureSensors(thermostatInstance) {
+    thermostatInstance.clearRemoteTemperature() // Clear any lingering value
+    
+    if (remoteTempSensors != null) {
+        logger('trace', 'initializeRemoteTemperatureSensors', 'remote sensors found')
         thermostatInstance.clearRemoteTemperature() // Clear any lingering value
 
         // Remove any sensors chosen that are actually of this device type
         // TODO: figure out why the UI never updates to catch on to this
         if (remoteTempSensors?.removeAll { device -> device.getTypeName() == 'Mitsubishi2Mqtt Thermostat Device' }) {
-            logger('warn', 'initialize', 'Some remote sensors were ignored because they are Mitsubishi2Mqtt child devices')
+            logger('warn', 'initializeRemoteTemperatureSensors', 'Some remote sensors were ignored because they are Mitsubishi2Mqtt child devices')
         }
 
         // Subscribe to the new sensor(s)
         if (remoteTempSensors != null && remoteTempSensors.size() > 0) {
-            logger('info', 'initialize', "Initializing ${remoteTempSensors.size()} remote sensor(s)")
+            logger('info', 'initializeRemoteTemperatureSensors', "Initializing ${remoteTempSensors.size()} remote sensor(s)")
 
             // Get all events from the remote sensors. This way even if the temp is constant
             // we have a better signal that the sensors are still online. The device client
@@ -199,9 +206,15 @@ def initialize(thermostatInstance) {
             updateRemoteTemperature(thermostatInstance)
         }
     }
+}
 
-    // Set device settings if this is a new device
-    thermostatInstance.updated()
+def initializeRemoteIlluminanceSensors() {
+    // Subscribe to the new sensor(s)
+    if (location.currentMode.getName() == 'Day' && remoteIlluminanceSensors != null && remoteIlluminanceSensors.size() > 0) {
+        logger('info', 'initializeRemoteIlluminanceSensors', "Initializing ${remoteIlluminanceSensors.size()} remote sensor(s)")
+        subscribe(remoteIlluminanceSensors, 'illuminance', remoteIlluminanceHandler)
+        updateRemoteIlluminance()
+    }
 }
 
 //************************************************************
@@ -270,7 +283,7 @@ def scheduledUpdateCheck() {
 
     if (currentMode == 'heat') {        
         runIn(1, 'handleHeatingTempUpdate')
-        runIn(60, 'checkForFanUpdate', [data: currentMode])
+        runIn(20, 'checkForFanUpdate', [data: currentMode])
     } else if (currentMode == 'cool') {        
         runIn(1, 'checkForFanUpdate', [data: currentMode])
     }
@@ -320,24 +333,22 @@ def handleHeatingTempUpdate() {
 
             if (coldWeatherHeatBoost) {
                 if (state.lastWeatherExpectedHigh < 40 && state.lastWeatherExpectedLow < 32) {
-                    logger('info', 'handleHeatingTempUpdate', 'bumping temp two degrees because the high is below 40 and low below 32')
+                    logger('debug', 'handleHeatingTempUpdate', 'bumping temp two degrees because the high is below 40 and low below 32')
                     currentRequestedTemp += 2
                 } else if (state.lastWeatherExpectedHigh < 45 && state.lastWeatherExpectedLow < 34) {
-                    logger('info', 'handleHeatingTempUpdate', 'bumping temp one degree because the high is below 45 and low below 34')
+                    logger('debug', 'handleHeatingTempUpdate', 'bumping temp one degree because the high is below 45 and low below 34')
                     currentRequestedTemp++
                 }
             }
         }
 
         // If it's going to be very sunny, reduce the heat
-        def sns = getSunriseAndSunset(sunriseOffset: '0:30', sunsetOffset: '-0:30')
         if (heatingSunBoost > 0 &&                                               // if this device has a sunboost
-            timeOfDayIsBetween(sns.sunrise, sns.sunset, new Date()) &&           // and it is peak day time
-            state.lastWeatherCloudiness != null &&                               // and we have cloud data
-            state.lastWeatherCloudiness <= 80)                                   // and it says it is fairly sunny
+            state.lastHighIlluminanceTime != null &&                             // and we have at least 10 minutes
+            now() - 600000 > state.lastHighIlluminanceTime)                      // of bright sunshine
         {
-            def sunReduction = (((100 - state.lastWeatherCloudiness) / 80) * heatingSunBoost).toDouble().round()
-            logger('debug', 'handleHeatingTempUpdate', "sunny day -- reduce heat setting by $sunReduction (${state.lastWeatherCloudiness})")
+            def sunReduction = heatingSunBoost
+            logger('debug', 'handleHeatingTempUpdate', "sunny day -- reduce heat setting by $sunReduction")
             currentRequestedTemp -= sunReduction
         }
     }
@@ -371,7 +382,6 @@ def checkForFanUpdate(currentMode) {
 
     def currentSetpoint = thermostatInstance.currentValue('thermostatSetpoint')
     def currentIndoorTemp = thermostatInstance.currentValue('temperature')
-    def currentThermostatFanMode = thermostatInstance.currentValue('thermostatFanMode')
 
     def fanSpeed = fanBoost.toInteger() + ((currentMode == 'cool') ? (currentIndoorTemp - currentSetpoint) : (currentSetpoint - currentIndoorTemp))
     logger('trace', 'checkForFanUpdate', "currentIndoorTemp is $currentIndoorTemp; currentSetpoint is $currentSetpoint; fanBoost is $fanBoost; initial fanSpeed is $fanSpeed")
@@ -470,6 +480,45 @@ def updateRemoteTemperature(thermostatInstance) {
 }
 
 //************************************************************
+// remoteIlluminanceHandler
+//     Handles a sensor illuminance change event
+//     Do not call this directly, only used to handle events
+//
+// Signature(s)
+//     remoteIlluminanceHandler(evt)
+//
+// Parameters
+//     evt : passed by the event subsciption
+//
+// Returns
+//     None
+//
+//************************************************************
+def remoteIlluminanceHandler(evt) {
+    logger('trace', 'remoteIlluminanceHandler', "Got event: ${evt.name}, ${evt.value}")
+
+    def sunnyThreshold = 20000
+    def foundSunnySensor = false
+    
+    // Just look for any sensor that is in really bright sunlight.
+    // Consider replacing this with some area-under-the-curve intelligence
+    logger('trace', 'updateRemoteIlluminance', "Checking ${remoteIlluminanceSensors.size()} sensors to see if any are in bright sunshine")
+    for (sensor in remoteIlluminanceSensors) {
+        if (sensor.currentValue('presence') == 'present' && sensor.currentValue('illuminance') >= sunnyThreshold) {
+            foundSunnySensor = true;
+            break;
+        }
+    }
+
+    if (foundSunnySensor && state.lastHighIlluminanceTime == null) {
+        logger('trace', 'updateRemoteIlluminance', "Marking onset of a very sunny period")
+        state.lastHighIlluminanceTime = now();
+    } else {
+        state.lastHighIlluminanceTime = null;
+    }
+}
+
+//************************************************************
 // updateWeatherData
 //     Update current outdoor temperature based on selected sensors
 //
@@ -478,7 +527,6 @@ def updateRemoteTemperature(thermostatInstance) {
 //
 // Parameters
 //     temperature : number
-//     cloudiness : number
 //     expectedLow : number
 //     expectedHigh : number
 //
@@ -486,21 +534,31 @@ def updateRemoteTemperature(thermostatInstance) {
 //     None
 //
 //************************************************************
-def updateWeatherData(temperature = null, cloudiness = null, expectedLow = null, expectedHigh = null) {
-    if (temperature == null || cloudiness == null || expectedLow == null || expectedHigh == null) {
+def updateWeatherData(temperature = null, expectedLow = null, expectedHigh = null) {
+    if (temperature == null || expectedLow == null || expectedHigh == null) {
         logger('trace', 'updateWeatherData', 'Clearing weather data')
         state.lastWeatherDataTime = null
         state.lastWeatherOutsideTemp = null
-        state.lastWeatherCloudiness = null
         state.lastWeatherExpectedLow = null
         state.lastWeatherExpectedHigh = null
     } else {
         logger('trace', 'updateWeatherData', 'Updating weather data')
         state.lastWeatherDataTime = now()
         state.lastWeatherOutsideTemp = temperature
-        state.lastWeatherCloudiness = cloudiness.toInteger()
         state.lastWeatherExpectedLow = expectedLow.toInteger()
         state.lastWeatherExpectedHigh = expectedHigh.toInteger()
+    }
+}
+
+def locationModeChanged(evt) {
+    if (location.currentMode.getName() == 'Day') {
+        if (remoteIlluminanceSensors != null && remoteIlluminanceSensors.size() > 0) {
+            logger('trace', 'locationModeChanged', "Mode changed to Day; subscribe to illuminance sensors")
+            subscribe(remoteIlluminanceSensors, 'illuminance', remoteIlluminanceHandler)
+        }
+    } else {
+        logger('trace', 'locationModeChanged', "Mode no longer set to Day; unsubscribe from illuminance sensors")
+        unsubscribe(remoteIlluminanceHandler)
     }
 }
 

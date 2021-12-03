@@ -147,7 +147,6 @@ def initialize() {
         if (openWeatherMap != null) {
             logger('trace', 'initialize', 'openWeatherMap device found')
             subscribe(openWeatherMap, 'temperature', outsideConditionsHandler)
-            subscribe(openWeatherMap, 'cloud', outsideConditionsHandler)
         }
 
         // Update the temperature with these new sensors
@@ -169,12 +168,13 @@ def subscribeToMotionSensors() {
             logger('trace', 'subscribeToMotionSensors', "Initializing ${motionSensors.size()} motion sensor(s) and scheduling presence detection")
             subscribe(motionSensors, 'motion.active', motionActiveHandler)
             subscribe(motionSensors, 'motion.inactive', motionActiveHandler)
-            runEvery5Minutes(getRollingActivityLevel)
+            runEvery1Minute(getRollingActivityLevel)
         }
     } else {
         logger('trace', 'subscribeToMotionSensors', "Clearing subscriptions and schedules for presence detection")
         unsubscribe(motionActiveHandler)
         unschedule(getRollingActivityLevel)
+        homeActivityLevel.setVariable(0)
     }
 }
 
@@ -187,7 +187,6 @@ def updateOutsideConditions() {
     def total = 0
     def count = 0
     def outsideTemp = null
-    def cloudiness = null
     def forecastLow = null
     def forecastHigh = null
 
@@ -211,11 +210,6 @@ def updateOutsideConditions() {
         } else {
             total += openWeatherMap.currentValue('temperature') // TODO: figure out what to do for unit C vs F
             count++
-            cloudiness = openWeatherMap.currentValue('cloud')
-            cloudiness_forecast = openWeatherMap.currentValue('cloudToday')
-            if (cloudiness_forecast > 65 && cloudiness_forecast > cloudiness) {
-                cloudiness = cloudiness_forecast
-            }
             forecastLow = openWeatherMap.currentValue('forecastLow')
             forecastHigh = openWeatherMap.currentValue('forecastHigh')
         }
@@ -229,8 +223,8 @@ def updateOutsideConditions() {
     }
 
     childApps.each { child ->
-        logger('debug', 'updateOutsideConditions', "Updating child app's weather data: ${child.label} with temp:$outsideTemp, cloud:$cloudiness, low:$forecastLow, high:$forecastHigh")
-        child.updateWeatherData(outsideTemp, cloudiness, forecastLow, forecastHigh)
+        logger('debug', 'updateOutsideConditions', "Updating child app's weather data: ${child.label} with temp:$outsideTemp, low:$forecastLow, high:$forecastHigh")
+        child.updateWeatherData(outsideTemp, forecastLow, forecastHigh)
     }
 }
 
@@ -238,9 +232,9 @@ def locationModeChanged(evt) {
     subscribeToMotionSensors()
 
     if (location.currentMode.getName() == 'Away') {
-        def delayMinutes = 10
-        updateAwayModeDisabledUntil(delayMinutes)
+        def delayMinutes = 15
         logger('trace', 'locationModeChanged', "Mode changed to away; prevent away for $delayMinutes minutes to avoid bouncing")
+        updateAwayModeDisabledUntil(delayMinutes)
     } else {
         logger('trace', 'locationModeChanged', "Mode no longer set to away")
         state.motionSensorState = [:]
@@ -297,7 +291,8 @@ def motionActiveHandler(evt) {
 
 def getRollingActivityLevel() {
     def timeNow = now()
-    def windowStartTime = timeNow - 1800000
+    def windowSizeInMinutes = 30
+    def windowStartTime = timeNow - (1000 * windowSizeInMinutes * 60)
     def timeActive = 0
 
     def sensorHistories = state.motionSensorState
@@ -318,26 +313,31 @@ def getRollingActivityLevel() {
         timeActive += sensorTimeActive
     }
     
-    def percentActive = Math.min(100, (int) (100 * timeActive / 3600))
+    // Each sensor (if fully active in the period) can take us to 50% on its own. Cap at 100%.
+    def percentActive = Math.min(100, (int) (100 * timeActive / (120 * windowSizeInMinutes)))
     
     logger('trace', 'getRollingActivityLevel', "Activity level is $timeActive or $percentActive")
     homeActivityLevel.setVariable(percentActive)
     
-    if (percentActive > 10) {
-        updateAwayModeDisabledUntil(30)
-        logger('trace', 'getRollingActivityLevel', "Moderate activity in house; prevent away for 30 minutes")
-    } else if (percentActive > 30) {
+    if (percentActive >= 50) {
+        updateAwayModeDisabledUntil(120)
+        logger('trace', 'getRollingActivityLevel', "Very high activity in house; prevent away for at least two hours")
+    } else if (percentActive >= 25) {
         updateAwayModeDisabledUntil(60)
-        logger('trace', 'getRollingActivityLevel', "High activity in house; prevent away for one hour")
-    } else if (percentActive > 50) {
-        updateAwayModeDisabledUntil(240)
-        logger('trace', 'getRollingActivityLevel', "Very high activity in house; prevent away for four hours")
+        logger('trace', 'getRollingActivityLevel', "High activity in house; prevent away for at least one hour")
+    } else if (percentActive >= 10) {
+        updateAwayModeDisabledUntil(30)
+        logger('trace', 'getRollingActivityLevel', "Moderate activity in house; prevent away for at least 30 minutes")
+    } else if (percentActive >= 5) {
+        updateAwayModeDisabledUntil(10)
+        logger('trace', 'getRollingActivityLevel', "Low activity in house; prevent away for at least 10 minutes")
     }
 }
 
 def updateAwayModeDisabledUntil(minutes) {
     def newTimeRequested = now() + (60000 * minutes)
     state.disableAwayModeUntil = Math.max(state.disableAwayModeUntil, newTimeRequested)
+    logger('trace', 'updateAwayModeDisabledUntil', "Preventing away mode until ${new Date(state.disableAwayModeUntil).format('HH:mm:ss')}")
 }
 
 def allowAwayMode() {
@@ -345,11 +345,13 @@ def allowAwayMode() {
     def nightStart = Date.parse('HH:mm', settings.nighttimeStart)
     def nightEnd = Date.parse('HH:mm', settings.nighttimeEnd)
         
+    /*
     if ((nightStart < nightEnd && timeOfDayIsBetween(nightStart, nightEnd, nowTime)) || !timeOfDayIsBetween(nightEnd, nightStart, nowTime)) {  
         logger('trace', 'allowAwayMode', "Nighttime; prevent away mode")
         return false;
     }
-
+    */
+    
     // when there was recent activity
     if (state.disableAwayModeUntil > now()) {
         logger('trace', 'allowAwayMode', "Recent activity detected; prevent away mode")

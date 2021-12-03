@@ -291,7 +291,9 @@ def handleAppThermostatFanMode(fanMode, requestOff) {
     def currentFanMode = device.currentValue("thermostatFanMode")
     logger("trace", "handleAppThermostatFanMode", "set fan $fanMode with off $requestOff. Currently unit is in $currentMode and fan is at $currentFanMode")
     
-    if (requestOff) {
+    // If we are currently using the local temperature readings from the device, don't actually power it down,
+    // because that makes the temperature readings go crazy.
+    if (requestOff && usingRemoteTemperature()) {
         if (currentMode != "off") {
             logger("info", "handleAppThermostatFanMode", "turning unit off")
             state.modeOffSetByApp = true
@@ -304,6 +306,8 @@ def handleAppThermostatFanMode(fanMode, requestOff) {
             def lastRunningMode = getDataValue("lastRunningMode")
             logger("info", "handleAppThermostatFanMode", "turning unit back on to $lastRunningMode")
             setThermostatDeviceMode(lastRunningMode)
+        } else if (requestOff) {
+            logger("info", "handleAppThermostatFanMode", "not turning unit off because remote temperature is not available")
         }
     }
     
