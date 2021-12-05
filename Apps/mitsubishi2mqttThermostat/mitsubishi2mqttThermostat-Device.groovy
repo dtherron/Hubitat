@@ -481,7 +481,7 @@ def parseSettings(parsedSettings) {
 def parseState(parsedState) {
     def currentMode = device.currentValue("trueThermostatMode")
     if (setIfNotNullAndChanged(parsedState?.mode, "trueThermostatMode", "parseState")) {
-        logger("info", "parsedState", "Mode changed to ${parsedState.mode}")
+        logger("info", "parseState", "Mode changed to ${parsedState.mode}")
         currentMode = parsedState.mode.toLowerCase()
         if (!state.modeOffSetByApp) {
             sendEvent(name: "thermostatMode", value: currentMode) 

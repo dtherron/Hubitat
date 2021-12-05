@@ -104,6 +104,8 @@ def updated() {
 def initialize() {
     logger('info', 'initialize', "Initializing; there are ${childApps.size()} child apps installed")
 
+    state.awayStartTime = location.currentMode.getName() == 'Away' ? now() : null
+    
     // reset the motion sensor state data
     state.motionSensorState = [:]
 
@@ -232,11 +234,14 @@ def locationModeChanged(evt) {
     subscribeToMotionSensors()
 
     if (location.currentMode.getName() == 'Away') {
+        state.awayStartTime = now()
         def delayMinutes = 15
         logger('trace', 'locationModeChanged', "Mode changed to away; prevent away for $delayMinutes minutes to avoid bouncing")
         updateAwayModeDisabledUntil(delayMinutes)
     } else {
         logger('trace', 'locationModeChanged', "Mode no longer set to away")
+        state.awayStartTime = null
+        state.disableAwayModeUntil = now();
         state.motionSensorState = [:]
         childApps.each { child ->
             logger('debug', 'locationModeChanged', "Calling scheduledUpdateCheck for child app: ${child.label}")
@@ -340,12 +345,22 @@ def updateAwayModeDisabledUntil(minutes) {
     logger('trace', 'updateAwayModeDisabledUntil', "Preventing away mode until ${new Date(state.disableAwayModeUntil).format('HH:mm:ss')}")
 }
 
+def getHoursSinceAway()
+{
+    if (state.awayStartTime == null) {
+        return 0;
+    }
+ 
+    long msPerHours = 1000*60*60; 
+    return (int) (((now() - state.awayStartTime) / msPerHours))
+}
+
 def allowAwayMode() {
     def nowTime = Date.parse('HH:mm', new Date(now()).format('HH:mm'))
     def nightStart = Date.parse('HH:mm', settings.nighttimeStart)
     def nightEnd = Date.parse('HH:mm', settings.nighttimeEnd)
         
-    /*
+    /* // Comment out. Let's try allowing away mode temps even at night
     if ((nightStart < nightEnd && timeOfDayIsBetween(nightStart, nightEnd, nowTime)) || !timeOfDayIsBetween(nightEnd, nightStart, nowTime)) {  
         logger('trace', 'allowAwayMode', "Nighttime; prevent away mode")
         return false;
