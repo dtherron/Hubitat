@@ -35,18 +35,20 @@ preferences {
 }
 
 def pageConfig() {
-    installed = false
-
-    if (!state.deviceID) {
-        installed = true
-    }
-
     // Display all options for a new instance of the Mitsubishi2Mqtt Thermostat
     dynamicPage(name: '', title: '', install: true, uninstall: true, refreshInterval:0) {
         section('<b>Device configuration</b>') {
+            input (name: 'useMqtt', type: 'bool', title: 'True to use MQTT; false to use direct HTTP', required: false, defaultValue: true)
+        }
+        
+        section('<b>MQTT configuration</b>') {
             label title: 'Local name of new Mitsubishi2Mqtt Thermostat app/device:', required: true
-            input (name: 'mqttTopic', type: 'text', title: 'MQTT topic specified in the configuration on the remote arduino', required: true, defaultValue: 'mitsubishi2mqtt')
+            input (name: 'mqttTopic', type: 'text', title: 'MQTT topic specified in the configuration on the remote arduino', required: false, defaultValue: 'mitsubishi2mqtt')
             input (name: 'heatPumpFriendlyName', type: 'text', title: 'Friendly Name of the device specified in the configuration on the remote arduino', required: true)
+
+        }
+        section('<b>HTTP configuration</b>') {
+            input (name: 'arduinoAddress', type: 'text', title: 'Local IP address or name of the heat pump\'s arduino:', required: false, defaultValue: 'UpstairsHeat')
         }
 
         section('<b>Configure schedule for heating (cooling is manual)</b>') {
@@ -84,15 +86,14 @@ def installed() {
     logger('info', 'installed', "Installed Running Mitsubishi2Mqtt Thermostat: $app.label")
 
     // Generate a random DeviceID
-    state.deviceID = 'm2mt' + Math.abs(new Random().nextInt() % 9999) + '_' + (now() % 9999)
+    def deviceID = 'm2mt' + Math.abs(new Random().nextInt() % 9999) + '_' + (now() % 9999)
 
     //Create Mitsubishi2Mqtt Thermostat device
     def thermostat
     def label = app.getLabel()
-    logger('info', 'installed', "Creating Mitsubishi2Mqtt Thermostat : ${label} with device id: ${state.deviceID}")
+    logger('info', 'installed', "Creating Mitsubishi2Mqtt Thermostat : ${label} with device id: $deviceID")
     try {
-        //** Should we add isComponent in the properties of the child device to make sure we can't remove the Device, will this make it that we can't change settings in it?
-        thermostat = addChildDevice('dtherron', 'Mitsubishi2Mqtt Thermostat Device', state.deviceID, [label: label, name: label, completedSetup: true])
+        thermostat = addChildDevice('dtherron', 'Mitsubishi2Mqtt Thermostat Device', deviceID, [label: label, name: label, isComponent: true])
     } catch (e) {
         logger('error', 'installed', "Error adding Mitsubishi2Mqtt Thermostat child ${label}: ${e}")
     }
@@ -129,8 +130,9 @@ def updated() {
 }
 
 def uninstalled() {
-    logger('info', 'uninstalled', "Child Device ${state.deviceID} removed")
-    deleteChildDevice(state.deviceID)
+    def deviceToRemove = getThermostat().getIdAsLong();
+    logger('info', 'uninstalled', "Child Device $deviceToRemove removed")
+    deleteChildDevice(deviceToRemove)
 }
 
 //************************************************************
@@ -170,13 +172,13 @@ def initialize(thermostatInstance) {
 
     state.lastWeatherDataTime = null
 
-    initializeRemoteTemperatureSensors(thermostatInstance);
-    initializeRemoteIlluminanceSensors();
-
     subscribe(location, 'mode', locationModeChanged)
 
     // Set device settings if this is a new device
     thermostatInstance.updated()
+
+    initializeRemoteTemperatureSensors(thermostatInstance);
+    initializeRemoteIlluminanceSensors();
 }
 
 def initializeRemoteTemperatureSensors(thermostatInstance) {
@@ -232,18 +234,13 @@ def initializeRemoteIlluminanceSensors() {
 //
 //************************************************************
 def getThermostat() {
-    // Does this instance have a DeviceID
-    if (!state.deviceID) {
-        //No DeviceID available what is going on, has the device been removed?
-        logger('error', 'getThermostat', 'getThermostat cannot access deviceID!')
+    if (getChildDevices().size() == 0) {
+        logger('error', 'getThermostat', 'no child device found')
+    } else if (getChildDevices().size() == 1) {
+        return getChildDevices().first()
     } else {
-        //We have a deviceID, continue and return ChildDeviceWrapper
-        logger('trace', 'getThermostat', "getThermostat for device ${state.deviceID}")
-        def child = getChildDevices().find {
-            d -> d.deviceNetworkId.startsWith(state.deviceID)
-        }
-        logger('trace', 'getThermostat', "getThermostat child is ${child}")
-        return child
+        // There should only be one child
+        logger('error', 'getThermostat', "There should only be one child device")
     }
 }
 
@@ -314,6 +311,7 @@ def handleHeatingTempUpdate() {
     // Look to see if we have rolled to a new scheduled entry. That will override even user changes
     if (previousEntries.size() != state.lastThermostatScheduleIndex) {
         state.lastThermostatScheduleIndex = previousEntries.size()
+        userChangedTemp = false
         logger('info', 'handleHeatingTempUpdate', "new current active schedule entry: ${currentScheduleEntry[1]} -> $currentRequestedTemp")
     } else {
         logger('trace', 'handleHeatingTempUpdate', "current active schedule entry: ${currentScheduleEntry[1]} -> $currentRequestedTemp")
@@ -322,6 +320,7 @@ def handleHeatingTempUpdate() {
     if (userChangedTemp) {
         // If there is a manual change, don't adjust it in most ways
         logger('debug', 'handleHeatingTempUpdate', "Manual change to temp to $currentSetpoint (from ${state.lastRequestedTemp}) is active")
+        currentRequestedTemp = currentSetpoint
     } else {
         // If the forecast high for the day is hotter than we want the house, back off on heating
         if (state.lastWeatherExpectedHigh != null) {
@@ -350,7 +349,8 @@ def handleHeatingTempUpdate() {
         
         if (heatingSunBoost > 0 &&                 // if this device has a sunboost
             brightSeconds != null &&               // and we have at least 10 minutes
-            brightSeconds >= 600)                  // of bright sunshine
+            brightSeconds >= 600 &&                // of bright sunshine
+            state.lastWeatherExpectedHigh > 45)
         {
             def sunReduction = (heatingSunBoost.toDouble() / 3).round()
             if (brightSeconds >= 1200) {
@@ -364,7 +364,7 @@ def handleHeatingTempUpdate() {
         }
     }
     
-    if (location.currentMode.getName() == 'Away' && parent?.allowAwayMode()) {
+    if (!userChangedTemp && location.currentMode.getName() == 'Away' && parent?.allowAwayMode()) {
         def coolDown = parent.getHoursSinceAway() + 1
         currentRequestedTemp = Math.max(awayModeHeatTemp, currentRequestedTemp - coolDown)
         logger('debug', 'handleHeatingTempUpdate', "house is set to Away. Setting temperature to $currentRequestedTemp")
@@ -372,17 +372,18 @@ def handleHeatingTempUpdate() {
     
     // Make sure on really cold days to not let the house get too cold to warm back up
     if (state.lastWeatherExpectedLow != null && state.lastWeatherExpectedLow < 32 && state.lastWeatherExpectedHigh < 45) {
-        def allowedMinTemp = 61
-        if (state.lastWeatherExpectedLow < 26) {
-            allowedMinTemp = 64
-        } else if (state.lastWeatherExpectedLow < 28) {
-            allowedMinTemp = 63
-        } else if (state.lastWeatherExpectedLow < 30) {
-            allowedMinTemp = 62
-        }
+        def allowedMinTemp = 1 + thermostatSchedule.collect { it[2] }.min().toInteger()
 
+        if (state.lastWeatherExpectedLow < 26 && state.lastWeatherOutsideTemp < 30) {
+            allowedMinTemp += 3
+        } else if (state.lastWeatherExpectedLow < 28 && state.lastWeatherOutsideTemp < 32) {
+            allowedMinTemp += 2
+        } else if (state.lastWeatherExpectedLow < 30 && state.lastWeatherOutsideTemp < 34) {
+            allowedMinTemp += 1
+        }
+        
         if (currentRequestedTemp < allowedMinTemp) {
-            logger('debug', 'handleHeatingTempUpdate', "Expected low is below freezing. Increasing minimum temp to $allowedMinTemp")
+            logger('debug', 'handleHeatingTempUpdate', "Expected low is really cold; increasing minimum temp to $allowedMinTemp")
             currentRequestedTemp = allowedMinTemp
         }
     }
@@ -408,9 +409,9 @@ def checkForFanUpdate(currentMode) {
         logger('trace', 'checkForFanUpdate', "currentOutdoorTemp is $currentOutdoorTemp")
         if (currentMode == 'heat') {
             if (currentOutdoorTemp < 25) { fanSpeed += 4 }
-            else if (currentOutdoorTemp < 32) { fanSpeed += 3 }
-            else if (currentOutdoorTemp < 34) { fanSpeed += 2 }
-            else if (currentOutdoorTemp < 36) { fanSpeed += 1 }
+            else if (currentOutdoorTemp <= 32) { fanSpeed += 3 }
+            else if (currentOutdoorTemp <= 35) { fanSpeed += 2 }
+            else if (currentOutdoorTemp <= 38) { fanSpeed += 1 }
             else if (currentOutdoorTemp > 60) { fanSpeed -= 3 }
             else if (currentOutdoorTemp > 55) { fanSpeed -= 2 }
             else if (currentOutdoorTemp > 50) { fanSpeed -= 1 }
@@ -562,8 +563,8 @@ def updateWeatherData(temperature = null, expectedLow = null, expectedHigh = nul
         logger('trace', 'updateWeatherData', 'Updating weather data')
         state.lastWeatherDataTime = now()
         state.lastWeatherOutsideTemp = temperature
-        state.lastWeatherExpectedLow = expectedLow.toInteger()
-        state.lastWeatherExpectedHigh = expectedHigh.toInteger()
+        state.lastWeatherExpectedLow = (expectedLow as float).round()
+        state.lastWeatherExpectedHigh = (expectedHigh as float).round()
     }
 }
 
@@ -577,6 +578,10 @@ def locationModeChanged(evt) {
         logger('trace', 'locationModeChanged', "Mode no longer set to Day; unsubscribe from illuminance sensors")
         unsubscribe(remoteIlluminanceHandler)
     }
+}
+
+def compressorFrequencyChanged(frequency) {
+    parent?.compressorFrequencyChanged(frequency)
 }
 
 def logger(level, source) {

@@ -77,7 +77,6 @@ preferences {
 
         section('<b>Home/away detection</b>') {
             input 'motionSensors', 'capability.motionSensor', title: 'Motion sensors (to detect somebody is home)', multiple: true, required: false
-            input 'homeActivityLevel', 'device.VirtualOmniSensor', title: 'Where to log home activity level', multiple: false, required: false
             input(name: 'nighttimeStart', type: 'string', title: 'Time when night begins', description: 'e.g. when you go to sleep, and away mode stops taking effect', required: true, defaultValue: "22:00")
             input(name: 'nighttimeEnd', type: 'string', title: 'Time when night ends', description: 'e.g. when you wake up, and away mode starts taking effect', required: true, defaultValue: "06:00")
          }
@@ -99,6 +98,33 @@ def updated() {
     logger('info', 'updated')
     unsubscribe()
     initialize()
+}
+
+def getCompressorFrequencyDevice() {
+    if (!state.compressorFrequencyLevelDevice) {
+        logger('info', 'getCompressorFrequencyDevice', 'Creating new child device for compressor frequency logging')
+    
+        state.compressorFrequencyLevelDevice = 'm2mt_cfd_' + Math.abs(new Random().nextInt() % 9999) + '_' + (now() % 9999)
+        return addChildDevice('hubitat', 'Virtual Dimmer', state.compressorFrequencyLevelDevice, [label: "Compressor Frequency Tracker", name: app.getLabel(), isComponent: true])
+    } else {
+        def child = getChildDevice(state.compressorFrequencyLevelDevice)
+        logger('trace', 'getCompressorFrequencyDevice', "child is ${child}")
+        return child
+    }
+}
+
+def getHomeActivityLevelDevice() {
+    if (!state.homeActivityLevelDevice) {
+        logger('info', 'getHomeActivityLevelDevice', 'Creating new child device for home activity level logging')
+    
+        state.homeActivityLevelDevice = 'm2mt_hal_' + Math.abs(new Random().nextInt() % 9999) + '_' + (now() % 9999)
+        return addChildDevice('hubitat', 'Virtual Dimmer', state.homeActivityLevelDevice, [label: "Home Activity Level", name: app.getLabel(), isComponent: true])
+    } else {
+        logger('trace', 'getHomeActivityLevelDevice', "find child with id ${state.homeActivityLevelDevice}")
+        def child = getChildDevice(state.homeActivityLevelDevice)
+        logger('trace', 'getHomeActivityLevelDevice', "child is ${child}")
+        return child
+    }
 }
 
 def initialize() {
@@ -176,7 +202,7 @@ def subscribeToMotionSensors() {
         logger('trace', 'subscribeToMotionSensors', "Clearing subscriptions and schedules for presence detection")
         unsubscribe(motionActiveHandler)
         unschedule(getRollingActivityLevel)
-        homeActivityLevel.setVariable(0)
+        getHomeActivityLevelDevice().setLevel(0)
     }
 }
 
@@ -256,8 +282,9 @@ def motionActiveHandler(evt) {
         return
     }
     
+    def devicePresent = evt.getDevice().currentValue('presence') == 'present'
     def deviceId = evt.getDeviceId().toString()
-    def isActive = evt.value == 'active'
+    def isActive = evt.value == 'active' && devicePresent
     if (evt.value != 'active' && evt.value != 'inactive') {
         logger('warn', 'motionActiveHandler', "Unexpected event ${evt.value} ignored")
         return
@@ -322,18 +349,18 @@ def getRollingActivityLevel() {
     def percentActive = Math.min(100, (int) (100 * timeActive / (120 * windowSizeInMinutes)))
     
     logger('trace', 'getRollingActivityLevel', "Activity level is $timeActive or $percentActive")
-    homeActivityLevel.setVariable(percentActive)
+    getHomeActivityLevelDevice().setLevel(percentActive)
     
-    if (percentActive >= 50) {
+    if (percentActive >= 32) {
         updateAwayModeDisabledUntil(120)
         logger('trace', 'getRollingActivityLevel', "Very high activity in house; prevent away for at least two hours")
-    } else if (percentActive >= 25) {
+    } else if (percentActive >= 16) {
         updateAwayModeDisabledUntil(60)
         logger('trace', 'getRollingActivityLevel', "High activity in house; prevent away for at least one hour")
-    } else if (percentActive >= 10) {
+    } else if (percentActive >= 8) {
         updateAwayModeDisabledUntil(30)
         logger('trace', 'getRollingActivityLevel', "Moderate activity in house; prevent away for at least 30 minutes")
-    } else if (percentActive >= 5) {
+    } else if (percentActive >= 4) {
         updateAwayModeDisabledUntil(10)
         logger('trace', 'getRollingActivityLevel', "Low activity in house; prevent away for at least 10 minutes")
     }
@@ -375,6 +402,10 @@ def allowAwayMode() {
     
     logger('trace', 'allowAwayMode', "Not nighttime and no recent activity; allow away mode")
     return true
+}
+
+def compressorFrequencyChanged(frequency) {
+    getCompressorFrequencyDevice().setLevel(frequency)
 }
 
 def getInheritedSetting(setting) {

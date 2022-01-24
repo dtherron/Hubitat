@@ -43,6 +43,14 @@ metadata {
         attribute "heatPumpWideVane", "ENUM", ["swing", "<<", "<", "|", ">", ">>", "<>"]
 
         preferences {
+            input (
+                name: 'useMqtt',
+                type: 'bool',
+                title: 'True to use MQTT; false to use direct HTTP',
+                required: false,
+                defaultValue: true,
+                displayDuringSetup: true
+            )
             input(
                 name: "brokerIp", 
                 type: "string",
@@ -92,6 +100,14 @@ metadata {
                 required: true,
                 displayDuringSetup: true
             )
+            input (
+                name: 'arduinoAddress',
+                type: 'string',
+                title: 'Local IP address or name of the heat pump\'s arduino:',
+                required: false,
+                defaultValue: 'UpstairsHeat',
+                displayDuringSetup: true
+            )
         }
     }
 }
@@ -106,7 +122,7 @@ def cool() {
     logger("info", "COMMAND", "command cool called")
     state.modeOffSetByApp = false
     setThermostatDeviceMode("cool") 
-    publishMqtt("temp/set", device.currentValue("coolingSetpoint"))
+    publishCommand("temp/set", device.currentValue("coolingSetpoint"))
 }
 
 def dry() {
@@ -136,7 +152,7 @@ def heat() {
         parent.scheduledUpdateCheck()
     }
     setThermostatDeviceMode("heat") 
-    publishMqtt("temp/set", device.currentValue("heatingSetpoint"))
+    publishCommand("temp/set", device.currentValue("heatingSetpoint"))
 }
 
 def off() {
@@ -151,7 +167,7 @@ def setCoolingSetpoint(value) {
     state.lastTemperatureSetByApp = false
     
     if (device.currentValue("thermostatMode") == "cool") {
-        publishMqtt("temp/set", "${value}")
+        publishCommand("temp/set", "${value}")
         if (parent) {
             parent.scheduledUpdateCheck()
         }
@@ -166,7 +182,7 @@ def setHeatingSetpoint(value) {
     state.lastTemperatureSetByApp = false
 
     if (device.currentValue("thermostatMode") == "heat") {
-        publishMqtt("temp/set", "${value}")
+        publishCommand("temp/set", "${value}")
         if (parent) {
             parent.scheduledUpdateCheck()
         }
@@ -212,12 +228,12 @@ def setThermostatMode(value) {
 def setThermostatFanMode(value) {
     logger("info", "COMMAND", "command setThermostatFanMode called: ${value}")
     state.modeOffSetByApp = false
-    publishMqtt("fan/set", "${value}")
+    publishCommand("fan/set", "${value}")
 }
 
 def setHeatPumpVane(value) {
     logger("info", "COMMAND", "command setHeatPumpVane called: ${value}")
-    publishMqtt("vane/set", "${value}")
+    publishCommand("vane/set", "${value}")
 }
 
 def setFanSpeed() { logger("warn", "COMMAND", "command setFanSpeed not available on this device") }
@@ -254,12 +270,28 @@ def installed() {
 //************************************************************
 //************************************************************
 def updated() {
+    state.lastHttpConnectionTime = 0
+
     if (getParentSettings()) {
         logger("info", "updated", "Device settings updated.")
-        disconnect()
-        runIn(3, "connect")
+        runIn(1, "refreshAfterUpdated")        
     } else {
         logger("trace", "updated", "Device settings not actually updated.")
+    }
+}
+
+def refreshAfterUpdated() {
+    if (settings.useMqtt) {
+        logger("trace", "refreshAfterUpdated", "Setting up for MQTT")
+        unschedule("httpCheckConnection")
+        disconnectMqtt()
+        disconnectHttp()
+        runIn(1, "connectMqtt")
+    } else {
+        logger("trace", "refreshAfterUpdated", "Setting up for HTTP")
+        disconnectMqtt();
+        connectHttp()
+        runEvery5Minutes("httpCheckConnection")
     }
 }
 
@@ -282,7 +314,7 @@ def handleAppTemperatureChange(value) {
     if (device.currentValue("thermostatSetpoint") != value) {
         logger("info", "handleAppTemperatureChange", "set temperature setpoint to ${value}")
         state.lastTemperatureSetByApp = true
-        publishMqtt("temp/set", "${value}")
+        publishCommand("temp/set", "${value}")
     }
 }
 
@@ -313,7 +345,7 @@ def handleAppThermostatFanMode(fanMode, requestOff) {
     
     if (currentFanMode != fanMode) {
         logger("debug", "handleAppThermostatFanMode", "set fan to $fanMode")
-        publishMqtt("fan/set", fanMode)
+        publishCommand("fan/set", fanMode)
     }
 }
 
@@ -330,7 +362,7 @@ def clearRemoteTemperature() {
         state.lastRemoteTemperatureTime = null
         state.lastRemoteTemperature = null
         logger("debug", "clearRemoteTemperature", "resetting remote temp to 0")
-        publishMqtt("remote_temp/set", "0")
+        publishCommand("remote_temp/set", "0")
     }
 }
 
@@ -340,7 +372,7 @@ def setRemoteTemperature(value) {
         state.lastRemoteTemperatureTime = now()
         state.lastRemoteTemperature = value
         logger("trace", "setRemoteTemperature", "set remote_temp to ${value}")
-        publishMqtt("remote_temp/set", "${value}")
+        publishCommand("remote_temp/set", "${value}")
     } else {
         logger("trace", "setRemoteTemperature", "remote remote_temp unchaged at ${value}")
     }
@@ -359,24 +391,20 @@ def checkRemoteTemperatureForStaleness() {
 
 def subscribe(topic) {
     if (notMqttConnected()) {
-        connect()
+        connectMqtt()
     }
     
     logger("info", "subscribe", "full topic: ${getTopicPrefix()}${topic}")
     interfaces.mqtt.subscribe("${getTopicPrefix()}${topic}")
 }
 
-def unsubscribe(topic) {
-    if (notMqttConnected()) {
-        connect()
+def connectMqtt() {
+    if (!settings.useMqtt) {
+        logger("error", "connectMqtt", "This was called when useMqtt was FALSE")
+        return;
     }
     
-    logger("info", "unsubscribe", "full topic: ${getTopicPrefix()}${topic}")
-    interfaces.mqtt.unsubscribe("${getTopicPrefix()}${topic}")
-}
-
-def connect() {
-    logger("info", "connect", "Connecting to MQTT broker as client ${getClientId()}")
+    logger("info", "connectMqtt", "Connecting to MQTT broker as client ${getClientId()}")
     
     try {   
         interfaces.mqtt.connect(getBrokerUri(),
@@ -387,7 +415,7 @@ def connect() {
         // delay for connection
         pauseExecution(1000)        
     } catch(Exception e) {
-        logger("error", "connect", "Connecting MQTT failed: ${e}")
+        logger("error", "connectMqtt", "Connecting MQTT failed: ${e}")
         return
     }
 
@@ -396,12 +424,12 @@ def connect() {
     // subscribe("debug")
 }
 
-def disconnect() {
-    logger("info", "disconnect", "Disconnecting from MQTT broker")
+def disconnectMqtt() {
+    logger("info", "disconnectMqtt", "Disconnecting from MQTT broker")
     try {
         interfaces.mqtt.disconnect()
     } catch(e) {
-        logger("warn", "disconnect", "Disconnection from broker failed: ${e.message}")
+        logger("warn", "disconnectMqtt", "Disconnection from broker failed: ${e.message}")
     }
 }
 
@@ -409,15 +437,203 @@ def disconnect() {
 // MQTT METHODS
 // ========================================================
 
+def normalize(name) {
+    return name.replaceAll("[^a-zA-Z0-9]+","-").toLowerCase()
+}
+
+def getBrokerUri() {        
+    return "tcp://${settings.brokerIp}:${settings.brokerPort}"
+}
+
+def getClientId() {
+    def hub = location.hubs[0]
+    def hubNameNormalized = normalize(hub.name)
+    return "hubitat_${hubNameNormalized}-${hub.hardwareID}-${device.getId()}".toLowerCase()
+}
+
+def getTopicPrefix() {
+    return "${settings.mqttTopic}/${settings.heatPumpFriendlyName}/"
+}
+
+def mqttConnected() {
+    return interfaces.mqtt.isConnected()
+}
+
+def notMqttConnected() {
+    return !mqttConnected()
+}
+
+def mqttClientStatus(status) {
+    logger("debug", "mqttClientStatus", "status: ${status}")
+}
+
+def publishMqtt(topic, payload) {
+    if (notMqttConnected()) {
+        connectMqtt()
+    }
+    
+    def pubTopic = "${getTopicPrefix()}${topic}"
+
+    try {
+        interfaces.mqtt.publish("${pubTopic}", "${payload}", 0, false)
+        logger("trace", "publishMqtt", "topic: ${pubTopic} payload: ${payload}")
+        
+    } catch (Exception e) {
+        logger("error", "publishMqtt", "Unable to publish message: ${e}")
+    }
+}
+
 // Parse incoming message from the MQTT broker
-def parse(String event) {
+def parseMqtt(String event) {
     def message = interfaces.mqtt.parseMessage(event)  
     def (topic, friendlyName, messageType) = message.topic.tokenize( '/' )
     
-    logger("trace", "parse", "Received MQTT message type ${messageType} on topic ${topic} from FN ${friendlyName} with value ${message.payload}")
+    logger("trace", "parseMqtt", "Received MQTT message type ${messageType} on topic ${topic} from FN ${friendlyName} with value ${message.payload}")
+    parseIncomingMessage(messageType, message.payload)
+}
 
+// ========================================================
+// HTTP METHODS
+// ========================================================
+
+def httpCheckConnection() {
+    logger("trace", "httpCheckConnection", "Checking if HTTP connection is up")
+    if (!settings.useMqtt && !http_connected()) {
+        logger("warn", "httpCheckConnection", "HTTP connection is down; resetting")
+        connectHttp()
+    }
+}
+
+def connectHttp(boolean skipUpCheck = false) {
+    if (settings.useMqtt) {
+        logger("error", "connectHttp", "This was called when useMqtt was TRUE")
+        return;
+    }
+
+    if (skipUpCheck || !http_connected()) {
+        logger("info", "connectHttp", "Connecting to arduino via HTTP")
+    
+        def hubIpAddress = location.hubs[0].getDataValue("localIP")
+        logger("trace", "connectHttp", "Hubitat's IP address is $hubIpAddress")
+        
+        Map headers = http_getHeaders()
+        def uri = "http://${settings.arduinoAddress}/hubitat_cmd?command=http_connect&hubitat_ip=$hubIpAddress"
+        logger("debug", "connectHttp", "Sending GET to $uri")
+
+        httpGet([uri: uri, headers: headers]) { resp ->
+            if (resp.success && resp.containsHeader("Connected") && resp.containsHeader("Arduino-MAC")) {
+                def macAddr = resp.getHeaders("Arduino-MAC")[0].getValue();
+                logger("debug", "connectHttp", "Success: ${resp.getStatus()}. Got MAC address $macAddr (device currently set to ${device.deviceNetworkId})")
+                if (device.deviceNetworkId != macAddr) {
+                    logger("warn", "connectHttp", "Updating deviceNetworkId to $macAddr")
+                    device.deviceNetworkId = macAddr
+                }
+                state.lastHttpConnectionTime = now()
+            } else {
+                logger("error", "connectHttp", "Connecting HTTP failed")
+            }
+        }
+    }
+}
+
+boolean http_connected() {
+    def isConnected = state.lastHttpConnectionTime > 0 && (now() - state.lastHttpConnectionTime < 300000)
+    logger("trace", "http_connected", "Compare ${state.lastHttpConnectionTime} to ${now()} for isConnected=$isConnected")
+    return isConnected;
+}
+
+def disconnectHttp() {
+    logger("info", "disconnectHttp", "Disconnecting from arduino via HTTP")
+    state.lastHttpConnectionTime = 0
+
+    Map headers = http_getHeaders()
+    def uri = "http://${settings.arduinoAddress}/hubitat_cmd?command=http_disconnect"
+    logger("debug", "disconnectHttp", "Sending GET to $uri")
+
+    httpGet([uri: uri, headers: headers]) { resp ->
+        if (resp.success && resp.containsHeader("Disconnected")) {
+            logger("trace", "disconnectHttp", "Success: ${resp.getStatus()}")
+        } else {
+            logger("error", "disconnectHttp", "Disconnecting HTTP failed")
+        }
+    }
+}
+
+private Map http_getHeaders() {
+    Map headers = [:]
+    headers.put("Host", settings.arduinoAddress)
+    headers.put("Content-Type", "application/x-www-form-urlencoded")
+    return headers
+}
+
+// This method is called when Hubitat wants to control the heat pump (in HTTP mode). It
+// sends the same payload as MQTT and passes the MQTT topic in a query param.
+private void http_sendCommand(String topic, String body = "") { 
+    if (!http_connected()) {
+        connectHttp(true);
+    }
+    
+    def pubTopic = "${getTopicPrefix()}${topic}"
+    Map headers = http_getHeaders()
+    def uri = "http://${settings.arduinoAddress}/hubitat_cmd?topic=$pubTopic&payload=$body"
+    logger("debug", "http_sendCommand", "Posting to $uri")
+
+    try {
+        asynchttpGet("http_parseResponseToWebRequest", [uri: uri, headers: headers])
+    } catch (e) {
+        logger("error", "http_sendCommand", "Error for $uri: $e")
+    }
+}
+
+// Confirm that we get back a 200 response after sending commands from Hubitat.
+void http_parseResponseToWebRequest(hubitat.scheduling.AsyncResponse asyncResponse, data) {
+    if(asyncResponse != null && asyncResponse.getStatus() == 200) {
+        logger("debug", "http_parseResponseToWebRequest", "received 200")
+        state.lastHttpConnectionTime = now()
+    } else {
+        logger("warn", "http_parseResponseToWebRequest", "Request failed (${asyncResponse.getStatus()}). Disconnecting HTTP to reset.")
+        disconnectHttp()
+    }
+}
+
+// This method receives status and settings messages from the heat pump (over HTTP). The same MQTT topic and payload
+// are encoded in the body and headers, and sent to the common method of parsing.
+def parseHttp(String message) {
+    def msg = parseLanMessage(message)
+    topic =  msg.headers.Topic
+    def (topic, friendlyName, messageType) = msg.headers.Topic.tokenize( '/' )
+    
+    logger("debug", "parseHttp", "Received HTTP message type ${messageType} on topic ${topic} from FN ${friendlyName} with value ${msg.body}")
+    state.lastHttpConnectionTime = now()
+    if (topic != "debug") {
+        parseIncomingMessage(messageType, msg.body)
+    }
+}
+
+// ========================================================
+// COMMON MESSAGE HANDLING
+// ========================================================
+
+def publishCommand(topic, payload) {
+    if (settings.useMqtt) {
+        publishMqtt(topic, payload)
+    } else {
+        http_sendCommand(topic, payload)
+    }
+}
+
+def parse(String message) {
+    logger("trace", "parse", "Received (with MQTT=${settings.useMqtt}): $message")
+    if (settings.useMqtt) {
+        parseMqtt(message)
+    } else {
+        parseHttp(message)
+    }
+}
+
+def parseIncomingMessage(messageType, payload) {
     def slurper = new groovy.json.JsonSlurper()
-    def result = slurper.parseText(message.payload)
+    def result = slurper.parseText(payload)
     
     if (messageType == "settings") {
         parseSettings(result)
@@ -454,7 +670,7 @@ def parseSettings(parsedSettings) {
         }
         if (currentMode != "off") {
             updateDataValue("lastRunningMode", parsedSettings.mode.toLowerCase())    
-            logger("trace", "parseState", "lastRunningMode changed to $currentMode")
+            logger("debug", "parseState", "lastRunningMode changed to $currentMode")
         }
     }
 
@@ -488,7 +704,7 @@ def parseState(parsedState) {
         }
         if (currentMode != "off") {
             updateDataValue("lastRunningMode", parsedState.mode.toLowerCase())    
-            logger("trace", "parseState", "lastRunningMode changed to $currentMode")
+            logger("debug", "parseState", "lastRunningMode changed to $currentMode")
         }
     }
 
@@ -512,6 +728,7 @@ def parseState(parsedState) {
     if (parsedState?.compressorFrequency != null && state.heatPumpCompressorFrequency != parsedState.compressorFrequency) {
         logger("trace", "parseState", "setting heatPumpCompressorFrequency to ${parsedState.compressorFrequency}")
         state.heatPumpCompressorFrequency = parsedState.compressorFrequency 
+        parent?.compressorFrequencyChanged(state.heatPumpCompressorFrequency)
     }    
 
     if (parsedState?.temperatureSource != null) {
@@ -525,26 +742,6 @@ def parseState(parsedState) {
     }
 
     checkRemoteTemperatureForStaleness()
-}
-
-def mqttClientStatus(status) {
-    logger("debug", "mqttClientStatus", "status: ${status}")
-}
-
-def publishMqtt(topic, payload, qos = 0, retained = false) {
-    if (notMqttConnected()) {
-        connect()
-    }
-    
-    def pubTopic = "${getTopicPrefix()}${topic}"
-
-    try {
-        interfaces.mqtt.publish("${pubTopic}", "${payload}", qos, retained)
-        logger("trace", "publishMqtt", "topic: ${pubTopic} payload: ${payload}")
-        
-    } catch (Exception e) {
-        logger("error", "publishMqtt", "Unable to publish message: ${e}")
-    }
 }
 
 // ========================================================
@@ -613,7 +810,7 @@ def setThermostatDeviceMode(String value) {
         logger("error", "setThermostatDeviceMode", "setThermostatDeviceMode called with null")
     } else if (value != device.currentValue("trueThermostatMode")) {
         logger("debug", "setThermostatDeviceMode", "setThermostatDeviceMode to ${value}")
-        publishMqtt("mode/set", value)
+        publishCommand("mode/set", value)
     }
 }
                              
@@ -635,36 +832,12 @@ def boolean getParentSetting(setting, type) {
 
 // Returns true if any setting has changed that requires the MQTT connection to be reset
 def boolean getParentSettings() {
-    return getParentSetting("brokerIp", "string") ||
+    return getParentSetting("useMqtt", "bool") ||
+        getParentSetting("brokerIp", "string") ||
         getParentSetting("brokerPort", "string") ||
         getParentSetting("brokerUser", "string") ||
         getParentSetting("brokerPassword", "password") ||
         getParentSetting("mqttTopic", "string") ||
-        getParentSetting("heatPumpFriendlyName", "string")
-}
-
-def normalize(name) {
-    return name.replaceAll("[^a-zA-Z0-9]+","-").toLowerCase()
-}
-
-def getBrokerUri() {        
-    return "tcp://${settings.brokerIp}:${settings.brokerPort}"
-}
-
-def getClientId() {
-    def hub = location.hubs[0]
-    def hubNameNormalized = normalize(hub.name)
-    return "hubitat_${hubNameNormalized}-${hub.hardwareID}-${device.getId()}".toLowerCase()
-}
-
-def getTopicPrefix() {
-    return "${settings.mqttTopic}/${settings.heatPumpFriendlyName}/"
-}
-
-def mqttConnected() {
-    return interfaces.mqtt.isConnected()
-}
-
-def notMqttConnected() {
-    return !mqttConnected()
+        getParentSetting("heatPumpFriendlyName", "string") ||
+        getParentSetting("arduinoAddress", "string")
 }
