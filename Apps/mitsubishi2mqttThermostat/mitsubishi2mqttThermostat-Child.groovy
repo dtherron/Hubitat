@@ -48,7 +48,7 @@ def pageConfig() {
 
         }
         section('<b>HTTP configuration</b>') {
-            input (name: 'arduinoAddress', type: 'text', title: 'Local IP address or name of the heat pump\'s arduino:', required: false, defaultValue: 'UpstairsHeat')
+            input (name: 'arduinoAddress', type: 'text', title: 'Local IP address or name of the heat pump\'s arduino:', required: false, defaultValue: 'MyHeat')
         }
 
         section('<b>Configure schedule for heating (cooling is manual)</b>') {
@@ -93,7 +93,8 @@ def installed() {
     def label = app.getLabel()
     logger('info', 'installed', "Creating Mitsubishi2Mqtt Thermostat : ${label} with device id: $deviceID")
     try {
-        thermostat = addChildDevice('dtherron', 'Mitsubishi2Mqtt Thermostat Device', deviceID, [label: label, name: label, isComponent: true])
+        //** Should we add isComponent in the properties of the child device to make sure we can't remove the Device, will this make it that we can't change settings in it?
+        thermostat = addChildDevice('dtherron', 'Mitsubishi2Mqtt Thermostat Device', deviceID, [label: label, name: label, completedSetup: true])
     } catch (e) {
         logger('error', 'installed', "Error adding Mitsubishi2Mqtt Thermostat child ${label}: ${e}")
     }
@@ -130,7 +131,7 @@ def updated() {
 }
 
 def uninstalled() {
-    def deviceToRemove = getThermostat().getIdAsLong();
+    def deviceToRemove = getThermostat().getDeviceNetworkId();
     logger('info', 'uninstalled', "Child Device $deviceToRemove removed")
     deleteChildDevice(deviceToRemove)
 }
@@ -281,13 +282,13 @@ def scheduledUpdateCheck() {
     if (currentMode == 'heat') {        
         runIn(1, 'handleHeatingUpdate')
     } else if (currentMode == 'cool') {        
-        runIn(1, 'checkForFanUpdate', [data: currentMode])
+        runIn(1, 'checkForFanUpdate')
     }
 }
 
 def handleHeatingUpdate() {
     handleHeatingTempUpdate();
-    checkForFanUpdate();
+    runIn(5, 'checkForFanUpdate')
 }
 
 def handleHeatingTempUpdate() {
@@ -389,13 +390,13 @@ def handleHeatingTempUpdate() {
     }
 
     if (currentRequestedTemp != currentSetpoint) {
-        logger('info', 'handleHeatingTempUpdate', "requesting to change temp from $currentSetpoint to $currentRequestedTemp")
+        logger('info', 'handleHeatingTempUpdate', "requesting to change temp from $currentSetpoint to $currentRequestedTemp (userChangedTemp=$userChangedTemp)")
         thermostatInstance.handleAppTemperatureChange(currentRequestedTemp)
         state.lastRequestedTemp = currentRequestedTemp
     }
 }
 
-def checkForFanUpdate(currentMode) {
+def checkForFanUpdate() {
     def thermostatInstance = getThermostat()
 
     def currentSetpoint = thermostatInstance.currentValue('thermostatSetpoint')

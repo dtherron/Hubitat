@@ -149,7 +149,6 @@ def heat() {
     if (parent) {
         // let the parent app take over settings again
         state.lastTemperatureSetByApp = true
-        parent.scheduledUpdateCheck()
     }
     setThermostatDeviceMode("heat") 
     publishCommand("temp/set", device.currentValue("heatingSetpoint"))
@@ -168,9 +167,8 @@ def setCoolingSetpoint(value) {
     
     if (device.currentValue("thermostatMode") == "cool") {
         publishCommand("temp/set", "${value}")
-        if (parent) {
-            parent.scheduledUpdateCheck()
-        }
+        unschedule(forceScheduledUpdateCheck)
+        runIn(5, "forceScheduledUpdateCheck")
     } else {
         sendEvent(name: "coolingSetpoint", value: value) 
     }
@@ -183,11 +181,16 @@ def setHeatingSetpoint(value) {
 
     if (device.currentValue("thermostatMode") == "heat") {
         publishCommand("temp/set", "${value}")
-        if (parent) {
-            parent.scheduledUpdateCheck()
-        }
+        unschedule(forceScheduledUpdateCheck)
+        runIn(5, "forceScheduledUpdateCheck")
     } else {
         sendEvent(name: "heatingSetpoint", value: value) 
+    }
+}
+
+def forceScheduledUpdateCheck() {
+    if (parent) {
+        parent.scheduledUpdateCheck()
     }
 }
 
@@ -319,6 +322,7 @@ def handleAppTemperatureChange(value) {
 }
 
 def handleAppThermostatFanMode(fanMode, requestOff) {
+    fanMode = "${fanMode}"
     def currentMode = device.currentValue("trueThermostatMode")
     def currentFanMode = device.currentValue("thermostatFanMode")
     logger("trace", "handleAppThermostatFanMode", "set fan $fanMode with off $requestOff. Currently unit is in $currentMode and fan is at $currentFanMode")
@@ -467,16 +471,16 @@ def mqttClientStatus(status) {
     logger("debug", "mqttClientStatus", "status: ${status}")
 }
 
-def publishMqtt(topic, payload) {
+def publishMqtt(messageType, payload) {
     if (notMqttConnected()) {
         connectMqtt()
     }
     
-    def pubTopic = "${getTopicPrefix()}${topic}"
+    def topic = "${getTopicPrefix()}${messageType}"
 
     try {
-        interfaces.mqtt.publish("${pubTopic}", "${payload}", 0, false)
-        logger("trace", "publishMqtt", "topic: ${pubTopic} payload: ${payload}")
+        interfaces.mqtt.publish("${topic}", "${payload}", 0, false)
+        logger("trace", "publishMqtt", "topic: ${topic} payload: ${payload}")
         
     } catch (Exception e) {
         logger("error", "publishMqtt", "Unable to publish message: ${e}")
@@ -520,9 +524,9 @@ def connectHttp(boolean skipUpCheck = false) {
         def uri = "http://${settings.arduinoAddress}/hubitat_cmd?command=http_connect&hubitat_ip=$hubIpAddress"
         logger("debug", "connectHttp", "Sending GET to $uri")
 
-        httpGet([uri: uri, headers: headers]) { resp ->
-            if (resp.success && resp.containsHeader("Connected") && resp.containsHeader("Arduino-MAC")) {
-                def macAddr = resp.getHeaders("Arduino-MAC")[0].getValue();
+        httpGet([uri: uri, headers: headers, timeout: 30]) { resp ->
+            if (resp.success && resp.containsHeader("Connected")) {
+                def macAddr = getMACFromIP(settings.arduinoAddress)
                 logger("debug", "connectHttp", "Success: ${resp.getStatus()}. Got MAC address $macAddr (device currently set to ${device.deviceNetworkId})")
                 if (device.deviceNetworkId != macAddr) {
                     logger("warn", "connectHttp", "Updating deviceNetworkId to $macAddr")
@@ -550,7 +554,7 @@ def disconnectHttp() {
     def uri = "http://${settings.arduinoAddress}/hubitat_cmd?command=http_disconnect"
     logger("debug", "disconnectHttp", "Sending GET to $uri")
 
-    httpGet([uri: uri, headers: headers]) { resp ->
+    httpGet([uri: uri, headers: headers, timeout: 30]) { resp ->
         if (resp.success && resp.containsHeader("Disconnected")) {
             logger("trace", "disconnectHttp", "Success: ${resp.getStatus()}")
         } else {
@@ -568,18 +572,18 @@ private Map http_getHeaders() {
 
 // This method is called when Hubitat wants to control the heat pump (in HTTP mode). It
 // sends the same payload as MQTT and passes the MQTT topic in a query param.
-private void http_sendCommand(String topic, String body = "") { 
+private void http_sendCommand(messageType, body = "") { 
     if (!http_connected()) {
         connectHttp(true);
     }
     
-    def pubTopic = "${getTopicPrefix()}${topic}"
     Map headers = http_getHeaders()
-    def uri = "http://${settings.arduinoAddress}/hubitat_cmd?topic=$pubTopic&payload=$body"
-    logger("debug", "http_sendCommand", "Posting to $uri")
+    def uri = "http://${settings.arduinoAddress}/hubitat_cmd?messageType=$messageType&payload=$body"
+    def timeSent = now()
+    logger("debug", "http_sendCommand", "Posting to $uri [request: $timeSent]")
 
     try {
-        asynchttpGet("http_parseResponseToWebRequest", [uri: uri, headers: headers])
+        asynchttpGet("http_parseResponseToWebRequest", [uri: uri, headers: headers, timeout: 30], [uri: uri, timeSent: timeSent])
     } catch (e) {
         logger("error", "http_sendCommand", "Error for $uri: $e")
     }
@@ -588,10 +592,10 @@ private void http_sendCommand(String topic, String body = "") {
 // Confirm that we get back a 200 response after sending commands from Hubitat.
 void http_parseResponseToWebRequest(hubitat.scheduling.AsyncResponse asyncResponse, data) {
     if(asyncResponse != null && asyncResponse.getStatus() == 200) {
-        logger("debug", "http_parseResponseToWebRequest", "received 200")
+        logger("debug", "http_parseResponseToWebRequest", "received 200 after ${(now()-data.timeSent)/1000}) seconds (request:${data.timeSent}; uri: ${data.uri})")
         state.lastHttpConnectionTime = now()
     } else {
-        logger("warn", "http_parseResponseToWebRequest", "Request failed (${asyncResponse.getStatus()}). Disconnecting HTTP to reset.")
+        logger("warn", "http_parseResponseToWebRequest", "Request failed (${asyncResponse.getStatus()}). Disconnecting HTTP to reset (request:${data.timeSent}; uri: ${data.uri})")
         disconnectHttp()
     }
 }
@@ -600,12 +604,11 @@ void http_parseResponseToWebRequest(hubitat.scheduling.AsyncResponse asyncRespon
 // are encoded in the body and headers, and sent to the common method of parsing.
 def parseHttp(String message) {
     def msg = parseLanMessage(message)
-    topic =  msg.headers.Topic
-    def (topic, friendlyName, messageType) = msg.headers.Topic.tokenize( '/' )
+    messageType = msg.headers.MessageType
     
-    logger("debug", "parseHttp", "Received HTTP message type ${messageType} on topic ${topic} from FN ${friendlyName} with value ${msg.body}")
+    logger("debug", "parseHttp", "Received HTTP message type ${messageType} with value ${msg.body}")
     state.lastHttpConnectionTime = now()
-    if (topic != "debug") {
+    if (messageType != "debug") {
         parseIncomingMessage(messageType, msg.body)
     }
 }
@@ -614,11 +617,11 @@ def parseHttp(String message) {
 // COMMON MESSAGE HANDLING
 // ========================================================
 
-def publishCommand(topic, payload) {
+def publishCommand(messageType, payload) {
     if (settings.useMqtt) {
-        publishMqtt(topic, payload)
+        publishMqtt(messageType, payload)
     } else {
-        http_sendCommand(topic, payload)
+        http_sendCommand(messageType, payload)
     }
 }
 
@@ -830,14 +833,15 @@ def boolean getParentSetting(setting, type) {
     return valueChanged;
 }
 
-// Returns true if any setting has changed that requires the MQTT connection to be reset
+// Returns true if any setting has changed that requires the connection to be reset
 def boolean getParentSettings() {
-    return getParentSetting("useMqtt", "bool") ||
-        getParentSetting("brokerIp", "string") ||
-        getParentSetting("brokerPort", "string") ||
-        getParentSetting("brokerUser", "string") ||
-        getParentSetting("brokerPassword", "password") ||
-        getParentSetting("mqttTopic", "string") ||
-        getParentSetting("heatPumpFriendlyName", "string") ||
-        getParentSetting("arduinoAddress", "string")
+    def anyChanged = getParentSetting("useMqtt", "bool")
+    anyChanged |= getParentSetting("brokerIp", "string")
+    anyChanged |= getParentSetting("brokerPort", "string")
+    anyChanged |= getParentSetting("brokerUser", "string")
+    anyChanged |= getParentSetting("brokerPassword", "password")
+    anyChanged |= getParentSetting("mqttTopic", "string")
+    anyChanged |= getParentSetting("heatPumpFriendlyName", "string")
+    anyChanged |= getParentSetting("arduinoAddress", "string")
+    return anyChanged
 }
