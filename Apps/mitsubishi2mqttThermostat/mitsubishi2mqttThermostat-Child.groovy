@@ -216,7 +216,7 @@ def initializeRemoteIlluminanceSensors() {
     // Subscribe to the new sensor(s)
     if (location.currentMode.getName() == 'Day' && remoteIlluminanceSensors != null && remoteIlluminanceSensors.size() > 0) {
         logger('info', 'initializeRemoteIlluminanceSensors', "Initializing ${remoteIlluminanceSensors.size()} remote sensor(s)")
-        subscribe(remoteIlluminanceSensors, 'illuminance', remoteIlluminanceHandler)
+        runEvery5Minutes(remoteIlluminanceHandler)
     }
 }
 
@@ -282,13 +282,13 @@ def scheduledUpdateCheck() {
     if (currentMode == 'heat') {        
         runIn(1, 'handleHeatingUpdate')
     } else if (currentMode == 'cool') {        
-        runIn(1, 'checkForFanUpdate')
+        runIn(1, 'checkForFanUpdate', [data: currentMode])
     }
 }
 
 def handleHeatingUpdate() {
     handleHeatingTempUpdate();
-    runIn(5, 'checkForFanUpdate')
+    runIn(5, 'checkForFanUpdate', [data: 'heat'])
 }
 
 def handleHeatingTempUpdate() {
@@ -372,14 +372,14 @@ def handleHeatingTempUpdate() {
     }
     
     // Make sure on really cold days to not let the house get too cold to warm back up
-    if (state.lastWeatherExpectedLow != null && state.lastWeatherExpectedLow < 32 && state.lastWeatherExpectedHigh < 45) {
+    if (state.lastWeatherExpectedLow != null && state.lastWeatherExpectedLow <= 32 && state.lastWeatherExpectedHigh < 45) {
         def allowedMinTemp = 1 + thermostatSchedule.collect { it[2] }.min().toInteger()
 
-        if (state.lastWeatherExpectedLow < 26 && state.lastWeatherOutsideTemp < 30) {
+        if (state.lastWeatherExpectedLow <= 26 && state.lastWeatherOutsideTemp <= 30) {
             allowedMinTemp += 3
-        } else if (state.lastWeatherExpectedLow < 28 && state.lastWeatherOutsideTemp < 32) {
+        } else if (state.lastWeatherExpectedLow <= 28 && state.lastWeatherOutsideTemp <= 32) {
             allowedMinTemp += 2
-        } else if (state.lastWeatherExpectedLow < 30 && state.lastWeatherOutsideTemp < 34) {
+        } else if (state.lastWeatherExpectedLow <= 30 && state.lastWeatherOutsideTemp <= 34) {
             allowedMinTemp += 1
         }
         
@@ -396,18 +396,17 @@ def handleHeatingTempUpdate() {
     }
 }
 
-def checkForFanUpdate() {
+def checkForFanUpdate(currentMode) {
     def thermostatInstance = getThermostat()
 
     def currentSetpoint = thermostatInstance.currentValue('thermostatSetpoint')
     def currentIndoorTemp = thermostatInstance.currentValue('temperature')
 
     def fanSpeed = fanBoost.toInteger() + ((currentMode == 'cool') ? (currentIndoorTemp - currentSetpoint) : (currentSetpoint - currentIndoorTemp))
-    logger('trace', 'checkForFanUpdate', "currentIndoorTemp is $currentIndoorTemp; currentSetpoint is $currentSetpoint; fanBoost is $fanBoost; initial fanSpeed is $fanSpeed")
+    logger('debug', 'checkForFanUpdate', "currentIndoorTemp is $currentIndoorTemp; currentSetpoint is $currentSetpoint; fanBoost is $fanBoost; initial fanSpeed is $fanSpeed")
 
     if (state.lastWeatherOutsideTemp != null) {
         def currentOutdoorTemp = state.lastWeatherOutsideTemp
-        logger('trace', 'checkForFanUpdate', "currentOutdoorTemp is $currentOutdoorTemp")
         if (currentMode == 'heat') {
             if (currentOutdoorTemp < 25) { fanSpeed += 4 }
             else if (currentOutdoorTemp <= 32) { fanSpeed += 3 }
@@ -416,6 +415,7 @@ def checkForFanUpdate() {
             else if (currentOutdoorTemp > 60) { fanSpeed -= 3 }
             else if (currentOutdoorTemp > 55) { fanSpeed -= 2 }
             else if (currentOutdoorTemp > 50) { fanSpeed -= 1 }
+            logger('debug', 'checkForFanUpdate', "currentOutdoorTemp is $currentOutdoorTemp; heating mode fanSpeed is $fanSpeed")
         }
     }
 
@@ -503,20 +503,14 @@ def updateRemoteTemperature(thermostatInstance) {
 //     Handles a sensor illuminance change event
 //     Do not call this directly, only used to handle events
 //
-// Signature(s)
-//     remoteIlluminanceHandler(evt)
-//
-// Parameters
-//     evt : passed by the event subsciption
-//
 // Returns
 //     None
 //
 //************************************************************
-def remoteIlluminanceHandler(evt) {
-    logger('trace', 'remoteIlluminanceHandler', "Got event: ${evt.name}, ${evt.value}")
+def remoteIlluminanceHandler() {
+    logger('trace', 'remoteIlluminanceHandler', "Invoked")
 
-    def sunnyThreshold = 20000
+    def sunnyThreshold = 10000
     def foundSunnySensor = false
     
     // Just look for any sensor that is in really bright sunlight.
@@ -532,7 +526,7 @@ def remoteIlluminanceHandler(evt) {
     if (!foundSunnySensor) {
         state.lastHighIlluminanceTime = null;
     } else if (state.lastHighIlluminanceTime == null) {
-        logger('trace', 'remoteIlluminanceHandler', "Marking onset of a very sunny period")
+        logger('debug', 'remoteIlluminanceHandler', "Marking onset of a very sunny period")
         state.lastHighIlluminanceTime = now();
     }
 }
@@ -573,11 +567,12 @@ def locationModeChanged(evt) {
     if (location.currentMode.getName() == 'Day') {
         if (remoteIlluminanceSensors != null && remoteIlluminanceSensors.size() > 0) {
             logger('trace', 'locationModeChanged', "Mode changed to Day; subscribe to illuminance sensors")
-            subscribe(remoteIlluminanceSensors, 'illuminance', remoteIlluminanceHandler)
+            runEvery5Minutes(remoteIlluminanceHandler)
         }
     } else {
         logger('trace', 'locationModeChanged', "Mode no longer set to Day; unsubscribe from illuminance sensors")
-        unsubscribe(remoteIlluminanceHandler)
+        unschedule(remoteIlluminanceHandler)
+        state.lastHighIlluminanceTime = null
     }
 }
 

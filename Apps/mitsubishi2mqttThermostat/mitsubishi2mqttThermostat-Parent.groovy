@@ -238,7 +238,7 @@ def updateOutsideConditions() {
         } else {
             total += openWeatherMap.currentValue('temperature') // TODO: figure out what to do for unit C vs F
             count++
-            forecastLow = openWeatherMap.currentValue('forecastLow')
+            forecastLow = new Date().getHours() >= 12 ? openWeatherMap.currentValue('forecastLow1') : openWeatherMap.currentValue('forecastLow')
             forecastHigh = openWeatherMap.currentValue('forecastHigh')
         }
     }
