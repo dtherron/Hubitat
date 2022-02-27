@@ -6,7 +6,6 @@ metadata {
         namespace: "dtherron", 
         author: "Dan Herron",
         importUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Drivers/Zigbee2MqttTemperatureDevice.groovy") {
-        
         capability "Sensor"
         capability "PresenceSensor"
         capability "Initialize"
@@ -86,6 +85,7 @@ def updated() {
     def logLevel = settings.logLevel.toInteger()
     logger("info", "updated", "Setting log level $logLevel.")
     state.loggingLevel = logLevel
+    disconnectMqtt()
     unschedule()
     subscribe()
     runEvery15Minutes("checkPresence")
@@ -111,6 +111,7 @@ def connectMqtt() {
                            settings?.brokerPassword)
        
         // delay for connection
+        logger("info", "connectMqtt", "Connected. Pausing.")
         pauseExecution(1000)        
     } catch(Exception e) {
         logger("error", "connectMqtt", "Connecting MQTT failed: ${e}")
@@ -150,6 +151,10 @@ def mqttConnected() {
 }
 
 // Parse incoming message from the MQTT broker
+def mqttClientStatus(String message) {
+    logger("trace", "mqttClientStatus", "Received MQTT stastus \"$message\"")
+}
+
 def parse(String event) {
     def message = interfaces.mqtt.parseMessage(event)  
     def (topic, friendlyName) = message.topic.tokenize( '/' )
@@ -157,7 +162,13 @@ def parse(String event) {
     logger("trace", "parse", "Received MQTT message on topic ${topic} from FN ${friendlyName} with value ${message.payload}")
 
     def slurper = new groovy.json.JsonSlurper()
-    def result = slurper.parseText(message.payload)
+    def result
+    try {
+        result = slurper.parseText(message.payload)
+    } catch(Exception e) {
+        logger("error", "parse", "parse failed on payload \"${message.payload}\", exception ${e.message}")
+        return
+    }
 
     sendEvent(name: "presence", value: "present") 
     state.lastReceivedData = now()
@@ -195,6 +206,7 @@ def checkPresence() {
         logger("warn", "checkPresence", "No updates in 4 hours; marking not present")
         sendEvent(name: "presence", value: "not present") 
         state.lastReceivedData = null
+        disconnectMqtt() // try forcing us to disconnect to see if MQTT is the problem
     }
 }
 
