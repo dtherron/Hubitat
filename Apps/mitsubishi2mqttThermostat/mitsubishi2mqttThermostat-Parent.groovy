@@ -372,14 +372,14 @@ def updateAwayModeDisabledUntil(minutes) {
     logger('trace', 'updateAwayModeDisabledUntil', "Preventing away mode until ${new Date(state.disableAwayModeUntil).format('HH:mm:ss')}")
 }
 
-def getHoursSinceAway()
+def getTimeSinceAway()
 {
     if (state.awayStartTime == null) {
         return 0;
     }
  
-    long msPerHours = 1000*60*60; 
-    return (int) (((now() - state.awayStartTime) / msPerHours))
+    long msPerCycle = 1000*60*30; // Every 30 minutes is a cycle
+    return (int) (((now() - state.awayStartTime) / msPerCycle))
 }
 
 def allowAwayMode() {

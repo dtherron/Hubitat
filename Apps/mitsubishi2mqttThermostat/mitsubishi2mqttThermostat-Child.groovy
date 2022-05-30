@@ -95,11 +95,18 @@ def installed() {
     try {
         //** Should we add isComponent in the properties of the child device to make sure we can't remove the Device, will this make it that we can't change settings in it?
         thermostat = addChildDevice('dtherron', 'Mitsubishi2Mqtt Thermostat Device', deviceID, [label: label, name: label, completedSetup: true])
+        updateThermostatId(deviceID);
     } catch (e) {
         logger('error', 'installed', "Error adding Mitsubishi2Mqtt Thermostat child ${label}: ${e}")
     }
 
     updated()
+}
+
+def updateThermostatId(childId) {
+    logger('info', 'updateThermostatId', "Updating child thermostat device ID to $childId")
+
+    state.thermostatDeviceId = childId
 }
 
 def updated() {
@@ -172,6 +179,7 @@ def initialize(thermostatInstance) {
     logger('info', 'initialize', "Initialize LogDropLevelTime: $settings.logDropLevelTime")
 
     state.lastWeatherDataTime = null
+    state.modeIsAway = location.currentMode.getName() == 'Away'
 
     subscribe(location, 'mode', locationModeChanged)
 
@@ -237,11 +245,17 @@ def initializeRemoteIlluminanceSensors() {
 def getThermostat() {
     if (getChildDevices().size() == 0) {
         logger('error', 'getThermostat', 'no child device found')
-    } else if (getChildDevices().size() == 1) {
-        return getChildDevices().first()
     } else {
-        // There should only be one child
-        logger('error', 'getThermostat', "There should only be one child device")
+        logger('trace', 'getThermostat', "Finding child with ID ${state.thermostatDeviceId}")
+
+        def child = getChildDevices().grep { it.getDeviceNetworkId() == state.thermostatDeviceId }.first()
+
+        if (!child) {
+            logger('error', 'getThermostat', "No child with ID ${state.thermostatDeviceId}")
+            return
+        }
+        
+        return child
     }
 }
 
@@ -273,8 +287,10 @@ def scheduledUpdateCheck() {
     def currentThermostateMode = thermostatInstance.currentValue('trueThermostatMode')
 
     // Manual in summer. If the user sets it to off, that will stick.
-    if (currentMonth >= 5 && currentMonth <= 9) {
+    if (currentMonth >= 4 && currentMonth <= 9) {
         currentMode = (currentThermostateMode == 'off' && !wasModeOffSetByApp) ? 'off' : getThermostat().getLastRunningMode()
+    } else if (thermostatInstance.currentValue('currentMode') != currentMode) {
+        logger('info', 'scheduledUpdateCheck', "allowing unit to be changed back to $currentMode because this is not a summer month")   
     }
         
     logger('debug', 'scheduledUpdateCheck', "currentMode is $currentMode because currentThermostateMode is $currentThermostateMode and wasModeOffSetByApp is $wasModeOffSetByApp")
@@ -291,7 +307,7 @@ def handleHeatingUpdate() {
     runIn(5, 'checkForFanUpdate', [data: 'heat'])
 }
 
-def handleHeatingTempUpdate() {
+def handleHeatingTempUpdate(boolean forceResetToSchedule = false) {
     def thermostatInstance = getThermostat()
     def currentSetpoint = thermostatInstance.currentValue('thermostatSetpoint')
     def currentRequestedTemp
@@ -302,7 +318,7 @@ def handleHeatingTempUpdate() {
     def timeNowAsMinutesAfterMidnight = timeStringToMinutesAfterMidnight(timeNow)
     def thermostatSchedule = state.thermostatSchedule
 
-    logger('trace', 'handleHeatingTempUpdate', "right now it is $timeNow ($timeNowAsMinutesAfterMidnight). Checking ${thermostatSchedule.size()} schedule entries: $thermostatSchedule")
+    logger('debug', 'handleHeatingTempUpdate', "right now it is $timeNow ($timeNowAsMinutesAfterMidnight). userChangedTemp = $userChangedTemp; forceResetToSchedule = $forceResetToSchedule. Checking ${thermostatSchedule.size()} schedule entries: $thermostatSchedule")
 
     // Find the currently scheduled temperature
     def previousEntries = thermostatSchedule.findAll { it[0] <= timeNowAsMinutesAfterMidnight }
@@ -310,12 +326,13 @@ def handleHeatingTempUpdate() {
     currentRequestedTemp = currentScheduleEntry[2]
 
     // Look to see if we have rolled to a new scheduled entry. That will override even user changes
-    if (previousEntries.size() != state.lastThermostatScheduleIndex) {
+    if (forceResetToSchedule || previousEntries.size() != state.lastThermostatScheduleIndex) {
         state.lastThermostatScheduleIndex = previousEntries.size()
         userChangedTemp = false
+        state.lastRequestedTemp = currentRequestedTemp
         logger('info', 'handleHeatingTempUpdate', "new current active schedule entry: ${currentScheduleEntry[1]} -> $currentRequestedTemp")
     } else {
-        logger('trace', 'handleHeatingTempUpdate', "current active schedule entry: ${currentScheduleEntry[1]} -> $currentRequestedTemp")
+        logger('debug', 'handleHeatingTempUpdate', "current active schedule entry: ${currentScheduleEntry[1]} -> $currentRequestedTemp")
     }
         
     if (userChangedTemp) {
@@ -366,7 +383,7 @@ def handleHeatingTempUpdate() {
     }
     
     if (!userChangedTemp && location.currentMode.getName() == 'Away' && parent?.allowAwayMode()) {
-        def coolDown = parent.getHoursSinceAway() + 1
+        def coolDown = parent.getTimeSinceAway() + 1
         currentRequestedTemp = Math.max(awayModeHeatTemp, currentRequestedTemp - coolDown)
         logger('debug', 'handleHeatingTempUpdate', "house is set to Away. Setting temperature to $currentRequestedTemp")
     }
@@ -403,6 +420,7 @@ def checkForFanUpdate(currentMode) {
     def currentIndoorTemp = thermostatInstance.currentValue('temperature')
 
     def fanSpeed = fanBoost.toInteger() + ((currentMode == 'cool') ? (currentIndoorTemp - currentSetpoint) : (currentSetpoint - currentIndoorTemp))
+
     logger('debug', 'checkForFanUpdate', "currentIndoorTemp is $currentIndoorTemp; currentSetpoint is $currentSetpoint; fanBoost is $fanBoost; initial fanSpeed is $fanSpeed")
 
     if (state.lastWeatherOutsideTemp != null) {
@@ -434,7 +452,14 @@ def checkForFanUpdate(currentMode) {
         normalizeFanSpeed = 4
     }
 
-    logger('debug', 'checkForFanUpdate', "Prefered fan speed is $fanSpeed, normalized to $normalizeFanSpeed, currentMode is $currentMode, wasModeOffSetByApp is $wasModeOffSetByApp, and request off is $requestOff")
+    def thermostatFanModeOverride = thermostatInstance.currentValue('thermostatFanModeOverride')
+    logger('debug', 'checkForFanUpdate', "thermostatFanModeOverride is $thermostatFanModeOverride")
+    if (thermostatFanModeOverride != "no-override") {
+        logger('debug', 'checkForFanUpdate', "Override of fan speed is set: locking to $thermostatFanModeOverride, currentMode is $currentMode, wasModeOffSetByApp is $wasModeOffSetByApp, and request off is $requestOff")
+        normalizeFanSpeed = thermostatFanModeOverride
+    } else {
+        logger('debug', 'checkForFanUpdate', "Prefered fan speed is $fanSpeed, normalized to $normalizeFanSpeed, currentMode is $currentMode, wasModeOffSetByApp is $wasModeOffSetByApp, and request off is $requestOff")
+    }        
 
     thermostatInstance.handleAppThermostatFanMode(normalizeFanSpeed, requestOff)
 }
@@ -574,6 +599,40 @@ def locationModeChanged(evt) {
         unschedule(remoteIlluminanceHandler)
         state.lastHighIlluminanceTime = null
     }
+
+    unschedule(resetToScheduleWhenAwayAndNotActive)
+    if (location.currentMode.getName() == 'Away') {
+        logger('debug', 'locationModeChanged', "Mode is away; in 30 minutes reset to scheduled temp")        
+        runIn(30 * 60, resetToScheduleWhenAwayAndNotActive) // wait 30 minutes to see if house is quiet
+    } else if (state.modeIsAway) {
+        logger('debug', 'locationModeChanged', "Mode is no longer away; reset to scheduled temp soon")        
+        runIn(30, handleHeatingTempUpdate,  [data: true]) 
+    }
+
+    state.modeIsAway = location.currentMode.getName() == 'Away'
+}
+
+def resetToScheduleWhenAwayAndNotActive() {
+    if (location.currentMode.getName() == 'Away' && parent?.allowAwayMode()) {
+        // When we go Away force the house back to the current setpoint
+        handleHeatingTempUpdate(true)
+    }
+}
+
+def getLoopCyclesSinceLastReportDevice() {
+    if (!state.loopCyclesSinceLastReportDevice) {
+        logger('info', 'getLoopCyclesSinceLastReport', 'Creating new child device for loop cycles logging')
+        state.loopCyclesSinceLastReportDevice = 'm2mt_lcslrd_' + Math.abs(new Random().nextInt() % 9999) + '_' + (now() % 9999)
+        return addChildDevice('hubitat', 'Virtual Illuminance Sensor', state.loopCyclesSinceLastReportDevice, [label: "Loop Cycles Tracker (${app.getLabel()})", name: 'Virtual Illuminance Sensor', isComponent: true])
+    } else {
+        def child = getChildDevice(state.loopCyclesSinceLastReportDevice)
+        logger('trace', 'getLoopCyclesSinceLastReport', "child is ${child}")
+        return child
+    }
+}
+
+def reportLoopCyclesSinceLastReport(loopCyclesSinceLastReport) {
+    getLoopCyclesSinceLastReportDevice().setLux(loopCyclesSinceLastReport)
 }
 
 def compressorFrequencyChanged(frequency) {

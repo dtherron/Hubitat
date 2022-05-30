@@ -36,11 +36,15 @@ metadata {
         command "setThermostatFanMode", [[name:"Fan mode (ignore above)", type: "ENUM", description:"Set the heat pump's fan speed setting", constraints: ["quiet", "auto", "1", "2", "3", "4"]]]
         command "setHeatPumpVane", ["string"]
         command "dry"
+        command "overrideThermostatFanMode", [[name:"Temporary override of app fan mode", type: "ENUM", description:"Set the heat pump's fan speed setting", constraints: ["quiet", "auto", "1", "2", "3", "4", "no-override"]]]
         
+        // currentMode is the _logical_ mode, meaning even if the app turns the unit off current mode remains in, e.g., HEAT
+        // whereas the trueThermostatMode reflects what state the unit is in right now
         attribute "trueThermostatMode", "ENUM", ["heat", "cool", "fan_only", "dry", "auto", "off"]
         attribute "temperatureUnit", "ENUM", ["C", "F"]
         attribute "heatPumpVane", "ENUM", ["auto", "swing", "1", "2", "3", "4", "5"]
         attribute "heatPumpWideVane", "ENUM", ["swing", "<<", "<", "|", ">", ">>", "<>"]
+        attribute "thermostatFanModeOverride", "ENUM", ["quiet", "auto", "1", "2", "3", "4", "no-override"]
 
         preferences {
             input (
@@ -148,7 +152,7 @@ def heat() {
     state.modeOffSetByApp = false
     if (parent) {
         // let the parent app take over settings again
-        state.lastTemperatureSetByApp = true
+        state.lastTemperatureSetByApp = device.currentValue("heatingSetpoint")
     }
     setThermostatDeviceMode("heat") 
     publishCommand("temp/set", device.currentValue("heatingSetpoint"))
@@ -158,12 +162,13 @@ def off() {
     logger("info", "COMMAND", "command off called")
     state.modeOffSetByApp = false
     setThermostatDeviceMode("off") 
+    sendEvent(name: "thermostatMode", value: "off", isStateChange: true)
 }
 
 def setCoolingSetpoint(value) {
     value = value.toDouble().round()
     logger("info", "COMMAND", "command setCoolingSetpoint called: ${value}")
-    state.lastTemperatureSetByApp = false
+    state.lastTemperatureSetByApp = null
     
     if (device.currentValue("thermostatMode") == "cool") {
         publishCommand("temp/set", "${value}")
@@ -177,7 +182,7 @@ def setCoolingSetpoint(value) {
 def setHeatingSetpoint(value) {
     value = value.toDouble().round()
     logger("info", "COMMAND", "command setHeatingSetpoint called: ${value}")
-    state.lastTemperatureSetByApp = false
+    state.lastTemperatureSetByApp = null
 
     if (device.currentValue("thermostatMode") == "heat") {
         publishCommand("temp/set", "${value}")
@@ -191,6 +196,16 @@ def setHeatingSetpoint(value) {
 def forceScheduledUpdateCheck() {
     if (parent) {
         parent.scheduledUpdateCheck()
+    }
+}
+
+// Allow us to tell the unit to override the fan mode set by the app.
+// Set this back to "no-override" to let the app return to doing its thing.
+def overrideThermostatFanMode(value) { 
+    logger("info", "COMMAND", "command overrideThermostatFanMode called: ${value}")
+    sendEvent(name: "thermostatFanModeOverride", value: value)
+    if (value != "no-override") {
+        setThermostatFanMode(value)
     }
 }
 
@@ -262,9 +277,10 @@ def installed() {
     sendEvent(name: "heatPumpWideVane", value: "swing", isStateChange: true)
     sendEvent(name: "heatPumpVane", value: "auto", isStateChange: true)
     sendEvent(name: "temperatureUnit", value: location.temperatureScale, isStateChange: true)
+    sendEvent(name: "thermostatFanModeOverride", value: "no-override")
     
     updateDataValue("lastRunningMode", "heat")    
-    state.lastTemperatureSetByApp = false
+    state.lastTemperatureSetByApp = null
     state.modeOffSetByApp = false
 
     updated()
@@ -302,7 +318,7 @@ def refreshAfterUpdated() {
 // App-driven smart mode
 // ========================================================
 def wasLastTemperatureChangeByApp() {
-    return state.lastTemperatureSetByApp == true
+    return state.lastTemperatureSetByApp != null
 }
 
 def wasModeOffSetByApp() {
@@ -316,7 +332,7 @@ def getLastRunningMode() {
 def handleAppTemperatureChange(value) {
     if (device.currentValue("thermostatSetpoint") != value) {
         logger("info", "handleAppTemperatureChange", "set temperature setpoint to ${value}")
-        state.lastTemperatureSetByApp = true
+        state.lastTemperatureSetByApp = value
         publishCommand("temp/set", "${value}")
     }
 }
@@ -423,6 +439,7 @@ def connectMqtt() {
         return
     }
 
+    subscribe("alert")
     subscribe("state")
     subscribe("settings")
     // subscribe("debug")
@@ -531,6 +548,7 @@ def connectHttp(boolean skipUpCheck = false) {
                 if (device.deviceNetworkId != macAddr) {
                     logger("warn", "connectHttp", "Updating deviceNetworkId to $macAddr")
                     device.deviceNetworkId = macAddr
+                    parent?.updateThermostatId(macAddr)
                 }
                 state.lastHttpConnectionTime = now()
             } else {
@@ -580,7 +598,7 @@ private void http_sendCommand(messageType, body = "") {
     Map headers = http_getHeaders()
     def uri = "http://${settings.arduinoAddress}/hubitat_cmd?messageType=$messageType&payload=$body"
     def timeSent = now()
-    logger("debug", "http_sendCommand", "Posting to $uri [request: $timeSent]")
+    logger("trace", "http_sendCommand", "Posting to $uri [request: $timeSent]")
 
     try {
         asynchttpGet("http_parseResponseToWebRequest", [uri: uri, headers: headers, timeout: 30], [uri: uri, timeSent: timeSent])
@@ -592,7 +610,7 @@ private void http_sendCommand(messageType, body = "") {
 // Confirm that we get back a 200 response after sending commands from Hubitat.
 void http_parseResponseToWebRequest(hubitat.scheduling.AsyncResponse asyncResponse, data) {
     if(asyncResponse != null && asyncResponse.getStatus() == 200) {
-        logger("debug", "http_parseResponseToWebRequest", "received 200 after ${(now()-data.timeSent)/1000}) seconds (request:${data.timeSent}; uri: ${data.uri})")
+        logger("trace", "http_parseResponseToWebRequest", "received 200 after ${(now()-data.timeSent)/1000}) seconds (request:${data.timeSent}; uri: ${data.uri})")
         state.lastHttpConnectionTime = now()
     } else {
         logger("warn", "http_parseResponseToWebRequest", "Request failed (${asyncResponse.getStatus()}). Disconnecting HTTP to reset (request:${data.timeSent}; uri: ${data.uri})")
@@ -606,7 +624,7 @@ def parseHttp(String message) {
     def msg = parseLanMessage(message)
     messageType = msg.headers.MessageType
     
-    logger("debug", "parseHttp", "Received HTTP message type ${messageType} with value ${msg.body}")
+    logger("trace", "parseHttp", "Received HTTP message type ${messageType} with value ${msg.body}")
     state.lastHttpConnectionTime = now()
     if (messageType != "debug") {
         parseIncomingMessage(messageType, msg.body)
@@ -635,6 +653,11 @@ def parse(String message) {
 }
 
 def parseIncomingMessage(messageType, payload) {
+    if (messageType == "alert") {
+        logger("warn", "parseIncomingMessage", payload)
+        return
+    }
+    
     def slurper = new groovy.json.JsonSlurper()
     def result = slurper.parseText(payload)
     
@@ -642,7 +665,7 @@ def parseIncomingMessage(messageType, payload) {
         parseSettings(result)
     } else if (messageType == "state") {
         parseState(result)
-    }
+    } 
 }
 
 def setIfNotNullAndChanged(newValue, attributeName, sourceMethod, boolean forceLowerCase = true) {
@@ -673,7 +696,7 @@ def parseSettings(parsedSettings) {
         }
         if (currentMode != "off") {
             updateDataValue("lastRunningMode", parsedSettings.mode.toLowerCase())    
-            logger("debug", "parseState", "lastRunningMode changed to $currentMode")
+            logger("debug", "parseSettings", "lastRunningMode changed to $currentMode")
         }
     }
 
@@ -681,6 +704,10 @@ def parseSettings(parsedSettings) {
         logger("info", "parseSettings", "Set point changed to ${parsedSettings.temperature}")
         if (currentMode == "heat") {
             logger("trace", "parseSettings", "setting heatingSetpoint to ${parsedSettings.temperature}")
+            if (device.currentValue("heatingSetpoint") != state.lastTemperatureSetByApp) {
+                logger("debug", "parseSettings", "external change to heatingSetpoint; resetting lastTemperatureSetByApp")
+                state.lastTemperatureSetByApp = null
+            }
             sendEvent(name: "heatingSetpoint", value: parsedSettings.temperature) 
         } else if (currentMode == "cool") {
             logger("trace", "parseSettings", "setting coolingSetpoint to ${parsedSettings.temperature}")
@@ -715,6 +742,10 @@ def parseState(parsedState) {
         logger("info", "parseState", "Set point changed to ${parsedState.temperature}")
         if (currentMode == "heat") {
             logger("trace", "parseState", "setting heatingSetpoint to ${parsedState.temperature}")
+            if (device.currentValue("heatingSetpoint") != state.lastTemperatureSetByApp) {
+                logger("debug", "parseState", "external change to heatingSetpoint; resetting lastTemperatureSetByApp")
+                state.lastTemperatureSetByApp = null
+            }
             sendEvent(name: "heatingSetpoint", value: parsedState.temperature) 
         } else if (currentMode == "cool") {
             logger("trace", "parseState", "setting coolingSetpoint to ${parsedState.temperature}")
@@ -744,6 +775,10 @@ def parseState(parsedState) {
         }
     }
 
+    if (parsedState?.loopCyclesSinceLastReport != null) {
+        parent?.reportLoopCyclesSinceLastReport(parsedState?.loopCyclesSinceLastReport)
+    }
+    
     checkRemoteTemperatureForStaleness()
 }
 
@@ -764,7 +799,6 @@ def parseState(parsedState) {
 //     None
 //************************************************************
 def logger(level, source, msg) {
-
     switch(level) {
         case "error":
             if (state.loggingLevel >= 1) log.error "[${source}] ${msg}"
@@ -811,7 +845,7 @@ def setLogLevel(level) {
 def setThermostatDeviceMode(String value) {
     if (value == null) {
         logger("error", "setThermostatDeviceMode", "setThermostatDeviceMode called with null")
-    } else if (value != device.currentValue("trueThermostatMode")) {
+    } else if (value != device.currentValue("trueThermostatMode") || value == "off") {
         logger("debug", "setThermostatDeviceMode", "setThermostatDeviceMode to ${value}")
         publishCommand("mode/set", value)
     }
