@@ -170,9 +170,12 @@ def initialize(thermostatInstance) {
     thermostatInstance.setLogLevel(loggingLevel)
 
     // Log level was set to a higher level than 3, drop level to 3 in x number of minutes
+    unschedule(logsDropLevel)
     if (loggingLevel > 3) {
         logger('debug', 'initialize', "Revert log level to default in $settings.logDropLevelTime minutes")
-        runIn(settings.logDropLevelTime.toInteger() * 60, logsDropLevel)
+        if (settings.logDropLevelTime > 0) {
+            runIn(settings.logDropLevelTime.toInteger() * 60, logsDropLevel)
+        }
     }
 
     logger('info', 'initialize', "App logging level set to $loggingLevel")
@@ -280,20 +283,7 @@ def scheduledUpdateCheck() {
         updateWeatherData()
     }
 
-    def thermostatInstance = getThermostat()
-    def currentMode = 'heat'
-    def currentMonth = new Date(now()).format('MM').toInteger()
-    def wasModeOffSetByApp = thermostatInstance.wasModeOffSetByApp() == true
-    def currentThermostateMode = thermostatInstance.currentValue('trueThermostatMode')
-
-    // Manual in summer. If the user sets it to off, that will stick.
-    if (currentMonth >= 4 && currentMonth <= 9) {
-        currentMode = (currentThermostateMode == 'off' && !wasModeOffSetByApp) ? 'off' : getThermostat().getLastRunningMode()
-    } else if (thermostatInstance.currentValue('currentMode') != currentMode) {
-        logger('info', 'scheduledUpdateCheck', "allowing unit to be changed back to $currentMode because this is not a summer month")   
-    }
-        
-    logger('debug', 'scheduledUpdateCheck', "currentMode is $currentMode because currentThermostateMode is $currentThermostateMode and wasModeOffSetByApp is $wasModeOffSetByApp")
+    def currentMode = getCurrentMode()
 
     if (currentMode == 'heat') {        
         runIn(1, 'handleHeatingUpdate')
@@ -302,12 +292,34 @@ def scheduledUpdateCheck() {
     }
 }
 
+def getCurrentMode() {
+    def thermostatInstance = getThermostat()
+    def currentMode = 'heat'
+    def currentMonth = new Date(now()).format('MM').toInteger()
+    def wasModeOffSetByApp = thermostatInstance.wasModeOffSetByApp() == true
+    def currentThermostateMode = thermostatInstance.currentValue('trueThermostatMode')
+
+    // Manual in summer. If the user sets it to off, that will stick.
+    if (currentMonth >= 4 && currentMonth <= 10) {
+        currentMode = (currentThermostateMode == 'off' && !wasModeOffSetByApp) ? 'off' : getThermostat().getLastRunningMode()
+    } else if (thermostatInstance.currentValue('currentMode') != currentMode) {
+        logger('info', 'getCurrentMode', "allowing unit to be changed back to $currentMode because this is not a summer month")   
+    }
+    
+    return currentMode
+}
+
 def handleHeatingUpdate() {
     handleHeatingTempUpdate();
     runIn(5, 'checkForFanUpdate', [data: 'heat'])
 }
 
 def handleHeatingTempUpdate(boolean forceResetToSchedule = false) {
+    if (getCurrentMode() != "heat") {
+        logger('debug', 'handleHeatingTempUpdate', "exiting; current mode is not heat")
+        return;
+    }
+    
     def thermostatInstance = getThermostat()
     def currentSetpoint = thermostatInstance.currentValue('thermostatSetpoint')
     def currentRequestedTemp
@@ -419,7 +431,7 @@ def checkForFanUpdate(currentMode) {
     def currentSetpoint = thermostatInstance.currentValue('thermostatSetpoint')
     def currentIndoorTemp = thermostatInstance.currentValue('temperature')
 
-    def fanSpeed = fanBoost.toInteger() + ((currentMode == 'cool') ? (currentIndoorTemp - currentSetpoint) : (currentSetpoint - currentIndoorTemp))
+    def fanSpeed = (fanBoost.toInteger() + ((currentMode == 'cool') ? (currentIndoorTemp - currentSetpoint) : (currentSetpoint - currentIndoorTemp))).floatValue().round()
 
     logger('debug', 'checkForFanUpdate', "currentIndoorTemp is $currentIndoorTemp; currentSetpoint is $currentSetpoint; fanBoost is $fanBoost; initial fanSpeed is $fanSpeed")
 

@@ -137,9 +137,12 @@ def initialize() {
 
     // Log level was set to a higher level than 3, drop level to 3 in x number of minutes
     loggingLevel = app.getSetting('logLevel').toInteger()
+    unschedule(logsDropLevel)
     if (loggingLevel > 3) {
         logger('debug', 'initialize', "Revert log level to default in $settings.logDropLevelTime minutes")
-        runIn(settings.logDropLevelTime.toInteger() * 60, logsDropLevel)
+        if (settings.logDropLevelTime > 0) {
+            runIn(settings.logDropLevelTime.toInteger() * 60, logsDropLevel)
+        }
     }
 
     logger('info', 'initialize', "App logging level set to $loggingLevel")

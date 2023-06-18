@@ -37,6 +37,8 @@ metadata {
         command "setHeatPumpVane", ["string"]
         command "dry"
         command "overrideThermostatFanMode", [[name:"Temporary override of app fan mode", type: "ENUM", description:"Set the heat pump's fan speed setting", constraints: ["quiet", "auto", "1", "2", "3", "4", "no-override"]]]
+
+        command "rebootNow"        
         
         // currentMode is the _logical_ mode, meaning even if the app turns the unit off current mode remains in, e.g., HEAT
         // whereas the trueThermostatMode reflects what state the unit is in right now
@@ -252,6 +254,10 @@ def setThermostatFanMode(value) {
 def setHeatPumpVane(value) {
     logger("info", "COMMAND", "command setHeatPumpVane called: ${value}")
     publishCommand("vane/set", "${value}")
+}
+
+def rebootNow() {
+    publishCommand("reboot/now", "")
 }
 
 def setFanSpeed() { logger("warn", "COMMAND", "command setFanSpeed not available on this device") }
@@ -532,10 +538,13 @@ def connectHttp(boolean skipUpCheck = false) {
     }
 
     if (skipUpCheck || !http_connected()) {
-        logger("info", "connectHttp", "Connecting to arduino via HTTP")
-    
         def hubIpAddress = location.hubs[0].getDataValue("localIP")
-        logger("trace", "connectHttp", "Hubitat's IP address is $hubIpAddress")
+        logger("info", "connectHttp", "Connecting to arduino via HTTP. Hubitat's IP address is $hubIpAddress")
+
+        if (hubIpAddress == "127.0.0.1" || hubIpAddress == "" || hubIpAddress == null) { // This is a hubitat bug
+            logger("error", "connectHttp", "Hubitat's IP address is wrong (hubitat bug). Setting to hardcoded known value")
+            hubIpAddress = "192.168.86.121"
+        }
         
         Map headers = http_getHeaders()
         def uri = "http://${settings.arduinoAddress}/hubitat_cmd?command=http_connect&hubitat_ip=$hubIpAddress"
@@ -544,7 +553,7 @@ def connectHttp(boolean skipUpCheck = false) {
         httpGet([uri: uri, headers: headers, timeout: 30]) { resp ->
             if (resp.success && resp.containsHeader("Connected")) {
                 def macAddr = getMACFromIP(settings.arduinoAddress)
-                logger("debug", "connectHttp", "Success: ${resp.getStatus()}. Got MAC address $macAddr (device currently set to ${device.deviceNetworkId})")
+                logger("warn", "connectHttp", "Success: ${resp.getStatus()}. currentMillis = " + resp.getHeaders("currentMillis").value)
                 if (device.deviceNetworkId != macAddr) {
                     logger("warn", "connectHttp", "Updating deviceNetworkId to $macAddr")
                     device.deviceNetworkId = macAddr
@@ -654,7 +663,7 @@ def parse(String message) {
 
 def parseIncomingMessage(messageType, payload) {
     if (messageType == "alert") {
-        logger("warn", "parseIncomingMessage", payload)
+        logger(payload.startsWith("Loop report:") ? "trace" : "warn", "parseIncomingMessage", payload)
         return
     }
     
