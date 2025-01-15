@@ -66,31 +66,8 @@ def updated() {
     initialize()
 }
 
-def getCompressorFrequencyDevice() {
-    if (!state.compressorFrequencyLevelDevice) {
-        logger('info', 'getCompressorFrequencyDevice', 'Creating new child device for compressor frequency logging')
-    
-        state.compressorFrequencyLevelDevice = 'm2mt_cfd_' + Math.abs(new Random().nextInt() % 9999) + '_' + (now() % 9999)
-        return addChildDevice('hubitat', 'Virtual Dimmer', state.compressorFrequencyLevelDevice, [label: "Compressor Frequency Tracker", name: app.getLabel(), isComponent: true])
-    } else {
-        def child = getChildDevice(state.compressorFrequencyLevelDevice)
-        logger('trace', 'getCompressorFrequencyDevice', "child is ${child}")
-        return child
-    }
-}
-
-def getHomeActivityLevelDevice() {
-    if (!state.homeActivityLevelDevice) {
-        logger('info', 'getHomeActivityLevelDevice', 'Creating new child device for home activity level logging')
-    
-        state.homeActivityLevelDevice = 'm2mt_hal_' + Math.abs(new Random().nextInt() % 9999) + '_' + (now() % 9999)
-        return addChildDevice('hubitat', 'Virtual Dimmer', state.homeActivityLevelDevice, [label: "Home Activity Level", name: app.getLabel(), isComponent: true])
-    } else {
-        logger('trace', 'getHomeActivityLevelDevice', "find child with id ${state.homeActivityLevelDevice}")
-        def child = getChildDevice(state.homeActivityLevelDevice)
-        logger('trace', 'getHomeActivityLevelDevice', "child is ${child}")
-        return child
-    }
+def setHomeActivityLevel(level) {
+    sendEvent(name: "homeActivityLevel", value: level)
 }
 
 def initialize() {
@@ -171,7 +148,7 @@ def subscribeToMotionSensors() {
         logger('trace', 'subscribeToMotionSensors', "Clearing subscriptions and schedules for presence detection")
         unsubscribe(motionActiveHandler)
         unschedule(getRollingActivityLevel)
-        getHomeActivityLevelDevice().setLevel(0)
+        setHomeActivityLevel(0)
     }
 }
 
@@ -318,7 +295,7 @@ def getRollingActivityLevel() {
     def percentActive = Math.min(100, (int) (100 * timeActive / (60 * windowSizeInMinutes)))
     
     logger('debug', 'getRollingActivityLevel', "Activity level is $timeActive or $percentActive")
-    getHomeActivityLevelDevice().setLevel(percentActive)
+    setHomeActivityLevel(percentActive)
     
     if (percentActive >= 32) {
         updateAwayModeDisabledUntil(120)
@@ -371,10 +348,6 @@ def allowAwayMode() {
     
     logger('debug', 'allowAwayMode', "No recent activity; allow away mode")
     return true
-}
-
-def compressorFrequencyChanged(frequency) {
-    getCompressorFrequencyDevice().setLevel(frequency)
 }
 
 def getInheritedSetting(setting) {

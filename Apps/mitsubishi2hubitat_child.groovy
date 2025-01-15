@@ -477,12 +477,10 @@ def updateRemoteTemperature() {
 
     // Average across all sensors, but ignore any not reporting as present
     for (sensor in remoteTempSensors) {
-        if (sensor.currentValue('presence') == 'not present' || sensor.currentValue('temperature') == null) {
-            break
+        if (sensor.currentValue('presence') != 'not present' && sensor.currentValue('temperature') != null) {
+	        total += sensor.currentValue('temperature') // TODO: figure out what to do for unit C vs F
+    	    count++
         }
-
-        total += sensor.currentValue('temperature') // TODO: figure out what to do for unit C vs F
-        count++
     }
 
     // Only send an update if we have data
@@ -542,10 +540,6 @@ def resetToScheduleWhenAwayAndNotActive() {
         // When we go Away force the house back to the current setpoint
         handleHeatingTempUpdate(true)
     }
-}
-
-def compressorFrequencyChanged(frequency) {
-    parent?.compressorFrequencyChanged(frequency)
 }
 
 def getInheritedSetting(setting) {

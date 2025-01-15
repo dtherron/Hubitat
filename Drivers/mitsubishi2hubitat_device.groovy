@@ -37,6 +37,7 @@ metadata {
         command "dry"
         command "overrideThermostatFanMode", [[name:"Temporary override of app fan mode", type: "ENUM", description:"Set the heat pump's fan speed setting", constraints: ["quiet", "auto", "1", "2", "3", "4", "no-override"]]]
 
+        attribute "compressorFrequency", "NUMBER"
         attribute "temperatureUnit", "ENUM", ["C", "F"]
         attribute "heatPumpVane", "ENUM", ["auto", "swing", "1", "2", "3", "4", "5"]
         attribute "heatPumpWideVane", "ENUM", ["swing", "<<", "<", "|", ">", ">>", "<>"]
@@ -603,10 +604,9 @@ def parseState(parsedData) {
     setIfNotNullAndChanged(parsedData?.vane, "heatPumpVane", "parseState")
     setIfNotNullAndChanged(parsedData?.wideVane, "heatPumpWideVane", "parseState")
     
-    if (parsedData?.compressorFrequency != null && state.heatPumpCompressorFrequency != parsedData.compressorFrequency) {
-        logger("trace", "parseState", "setting heatPumpCompressorFrequency to ${parsedData.compressorFrequency}")
-        state.heatPumpCompressorFrequency = parsedData.compressorFrequency 
-        parent?.compressorFrequencyChanged(state.heatPumpCompressorFrequency)
+    if (parsedData?.compressorFrequency != null && device.currentValue("compressorFrequency") != parsedData.compressorFrequency) {
+        logger("trace", "parseState", "setting compressorFrequency to ${parsedData.compressorFrequency}")
+        sendEvent(name: "compressorFrequency", value: parsedData.compressorFrequency)
     }    
 
     if (parsedData?.temperatureSource != null) {
