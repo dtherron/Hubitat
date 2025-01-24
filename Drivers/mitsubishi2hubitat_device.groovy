@@ -25,7 +25,7 @@ metadata {
     definition (name: "Mitsubishi2Hubitat Thermostat Device", 
         namespace: "dtherron", 
         author: "Dan Herron",
-        importUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2hubitatThermostat/mitsubishi2hubitatThermostat-Device.groovy") {
+        importUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2hubitat_device.groovy") {
         
         capability "Thermostat"
         capability "Sensor"

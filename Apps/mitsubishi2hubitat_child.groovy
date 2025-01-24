@@ -25,9 +25,9 @@ definition(
     author: 'Dan Herron',
     description: 'Connect via HTTP to a Mitsubishi heat pump that will appear as a thermostat.',
     category: 'Green Living',
-    iconUrl: 'https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2hubitatThermostat/mitsubishi2hubitatThermostat-logo-small.png',
-    iconX2Url: 'https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2hubitatThermostat/mitsubishi2hubitatThermostat-logo.png',
-    importUrl: 'https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2hubitatThermostat/mitsubishi2hubitatThermostat-Child.groovy',
+    iconUrl: '',
+    iconX2Url: '',
+    importUrl: 'https://raw.githubusercontent.com/dtherron/Hubitat/refs/heads/main/Apps/mitsubishi2hubitat_child.groovy',
     parent: 'dtherron:Mitsubishi2Hubitat Thermostat Manager'
 )
 
