@@ -164,7 +164,7 @@ def updateOutsideConditions() {
         outsideTemp = total / count
     }
 
-    childApps.findAll { it -> it["name"] = "Mitsubishi2Hubitat Thermostat Child"} .each { child ->
+    getChildApps.findAll { it -> it["name"] == "Mitsubishi2Hubitat Thermostat Child"} .each { child ->
         logger('debug', 'updateOutsideConditions', "Updating child app's weather data: ${child.label} with temp:$outsideTemp, low:$forecastLow, high:$forecastHigh")
         child.updateWeatherData(outsideTemp, forecastLow, forecastHigh)
     }
@@ -175,6 +175,6 @@ def getInheritedSetting(setting) {
 }
 
 def allowAwayMode() {
-    def houseActivityLevel = getChildApps().find { it["name"] = "Mitsubishi2Hubitat Thermostat House Activity Level" }
-    return houseActivityLevel == null ? true : houseActivityLevel.allowAwayMode()
+    def houseActivityLevelChild = getChildApps().find { it["name"] == "Mitsubishi2Hubitat Thermostat House Activity Level" }
+    return houseActivityLevelChild == null ? true : houseActivityLevelChild.allowAwayMode()
 }
