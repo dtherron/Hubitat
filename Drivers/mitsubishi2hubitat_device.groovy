@@ -25,7 +25,7 @@ metadata {
     definition (name: "Mitsubishi2Hubitat Thermostat Device", 
         namespace: "dtherron", 
         author: "Dan Herron",
-        importUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2hubitat_device.groovy") {
+        importUrl: "https://raw.githubusercontent.com/dtherron/Hubitat/main/Apps/mitsubishi2hubitatThermostat/mitsubishi2hubitatThermostat-Device.groovy") {
         
         capability "Thermostat"
         capability "Sensor"
@@ -373,6 +373,8 @@ def connectHttp(boolean skipUpCheck = false) {
         }
         
         Map headers = http_getHeaders()
+        // TODO: we should have the arduino return its current IP address, and cache and try to use that, and only
+        // fall back to the hostname if the ip address fails us
         def uri = "http://${settings.heatPumpArduinoHostname}/hubitat_cmd?command=http_connect&hubitat_ip=$hubIpAddress"
         logger("debug", "connectHttp", "Sending GET to $uri")
 

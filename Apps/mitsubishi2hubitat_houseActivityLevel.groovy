@@ -24,7 +24,7 @@ definition(
     namespace: 'dtherron',
     author: 'Dan Herron',
     description: 'Use presence sensors to determine whether to keep a house warm.',
-    category: 'Green Living',
+    category: '',
     iconUrl: '',
     iconX2Url: '',
     importUrl: 'https://raw.githubusercontent.com/dtherron/Hubitat/refs/heads/main/Apps/mitsubishi2hubitat_houseActivityLevel.groovy',
@@ -109,7 +109,7 @@ def locationModeChanged(evt) {
         updateAwayModeDisabledUntil(delayMinutes)
     } else {
         logger('trace', 'locationModeChanged', "Mode no longer set to away")
-        state.awayStartTime = null
+        state.remove("awayStartTime")
         state.disableAwayModeUntil = now();
         state.motionSensorState = [:]
         childApps.each { child ->
@@ -232,8 +232,7 @@ def updateAwayModeDisabledUntil(minutes) {
     logger('debug', 'updateAwayModeDisabledUntil', "Preventing away mode until ${new Date(state.disableAwayModeUntil).format('HH:mm:ss')}")
 }
 
-def getTimeSinceAway()
-{
+def getTimeSinceAway() {
     if (state.awayStartTime == null) {
         return 0;
     }
@@ -242,7 +241,7 @@ def getTimeSinceAway()
     return (int) (((now() - state.awayStartTime) / msPerCycle))
 }
 
-def allowAwayMode() {
+def allowAwayMode() { 
     // when there was recent activity
     if (state.disableAwayModeUntil > now()) {
         logger('debug', 'allowAwayMode', "Recent activity detected; prevent away mode")

@@ -178,3 +178,8 @@ def allowAwayMode() {
     def houseActivityLevelChild = getChildApps().find { it["name"] == "Mitsubishi2Hubitat Thermostat House Activity Level" }
     return houseActivityLevelChild == null ? true : houseActivityLevelChild.allowAwayMode()
 }
+
+def getTimeSinceAway() {
+    def houseActivityLevelChild = getChildApps().find { it["name"] == "Mitsubishi2Hubitat Thermostat House Activity Level" }
+    return houseActivityLevelChild == null ? 0 : houseActivityLevelChild.getTimeSinceAway()
+}
